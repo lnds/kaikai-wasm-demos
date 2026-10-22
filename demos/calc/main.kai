@@ -1,0 +1,213 @@
+effect Fail {
+  fail(msg: String) : Nothing
+}
+
+effect Vars {
+  lookup(name: String) : Int
+}
+
+effect Trace {
+  step(op: String, a: Int, b: Int, result: Int) : Unit
+}
+
+type Token = TNum(Int) | TName(String) | TOp(Char) | TOpen | TClose
+
+type Expr = Num(Int) | Var(String) | Neg(Expr) | Bin(Char, Expr, Expr)
+
+# --- lexer -------------------------------------------------------------
+
+fn lex(cs: [Char], acc: [Token]) : [Token] / Fail = match cs {
+  [] -> list.reverse(acc)
+  [c, ...rest] if is_space(c) -> lex(rest, acc)
+  [c, ...rest] if is_digit(c) -> {
+    let digits = list.take_while(cs, is_digit)
+    let n = string_to_int(string.from_chars(digits)) ?? 0
+    lex(list.drop(cs, length(digits)), [TNum(n), ...acc])
+  }
+  [c, ...rest] if is_alpha(c) -> {
+    let name = list.take_while(cs, is_alnum)
+    lex(list.drop(cs, length(name)), [TName(string.from_chars(name)), ...acc])
+  }
+  ['(', ...rest] -> lex(rest, [TOpen, ...acc])
+  [')', ...rest] -> lex(rest, [TClose, ...acc])
+  [c, ...rest] if list.contains(['+', '-', '*', '/', '%', '^'], c) -> lex(rest, [TOp(c), ...acc])
+  [c, ..._] -> Fail.fail("unexpected character '#{c}'")
+}
+
+# --- parser: expr = term (+|- term)*, term = unary (*|/|% unary)*,
+#             unary = -unary | power, power = atom (^ unary)? -------------
+
+fn describe(ts: [Token]) : String = match ts {
+  []             -> "end of input"
+  [TNum(n), ..._]  -> "number #{n}"
+  [TName(s), ..._] -> "name #{s}"
+  [TOp(c), ..._]   -> "'#{c}'"
+  [TOpen, ..._]    -> "'('"
+  [TClose, ..._]   -> "')'"
+}
+
+fn expr(ts: [Token]) : (Expr, [Token]) / Fail = {
+  let (lhs, rest) = term(ts)
+  expr_tail(lhs, rest)
+}
+
+fn expr_tail(lhs: Expr, ts: [Token]) : (Expr, [Token]) / Fail = match ts {
+  [TOp(c), ...rest] if c == '+' or c == '-' -> {
+    let (rhs, after) = term(rest)
+    expr_tail(Bin(c, lhs, rhs), after)
+  }
+  _ -> (lhs, ts)
+}
+
+fn term(ts: [Token]) : (Expr, [Token]) / Fail = {
+  let (lhs, rest) = unary(ts)
+  term_tail(lhs, rest)
+}
+
+fn term_tail(lhs: Expr, ts: [Token]) : (Expr, [Token]) / Fail = match ts {
+  [TOp(c), ...rest] if c == '*' or c == '/' or c == '%' -> {
+    let (rhs, after) = unary(rest)
+    term_tail(Bin(c, lhs, rhs), after)
+  }
+  _ -> (lhs, ts)
+}
+
+fn unary(ts: [Token]) : (Expr, [Token]) / Fail = match ts {
+  [TOp('-'), ...rest] -> {
+    let (e, after) = unary(rest)
+    (Neg(e), after)
+  }
+  _ -> power(ts)
+}
+
+fn power(ts: [Token]) : (Expr, [Token]) / Fail = {
+  let (base, rest) = atom(ts)
+  match rest {
+    [TOp('^'), ...after] -> {
+      let (exp, tail) = unary(after)
+      (Bin('^', base, exp), tail)
+    }
+    _ -> (base, rest)
+  }
+}
+
+fn atom(ts: [Token]) : (Expr, [Token]) / Fail = match ts {
+  [TNum(n), ...rest]  -> (Num(n), rest)
+  [TName(s), ...rest] -> (Var(s), rest)
+  [TOpen, ...rest] -> {
+    let (e, after) = expr(rest)
+    match after {
+      [TClose, ...tail] -> (e, tail)
+      _ -> Fail.fail("expected ')' but found #{describe(after)}")
+    }
+  }
+  _ -> Fail.fail("expected a value but found #{describe(ts)}")
+}
+
+fn parse(src: String) : Expr / Fail = {
+  let (e, rest) = expr(lex(string.chars(src), []))
+  match rest {
+    [] -> e
+    _  -> Fail.fail("unexpected #{describe(rest)}")
+  }
+}
+
+# --- evaluator: knows nothing about where variables or errors go -------
+
+fn pow(b: Int, e: Int, acc: Int) : Int = if e == 0 { acc } else { pow(b, e - 1, acc * b) }
+
+fn apply(op: Char, a: Int, b: Int) : Int / Fail = match op {
+  '+' -> a + b
+  '-' -> a - b
+  '*' -> a * b
+  '/' -> if b == 0 { Fail.fail("division by zero") } else { a / b }
+  '%' -> if b == 0 { Fail.fail("division by zero") } else { a % b }
+  '^' -> if b < 0 { Fail.fail("negative exponent") } else { pow(a, b, 1) }
+  _   -> Fail.fail("unknown operator #{op}")
+}
+
+fn eval(e: Expr) : Int / Fail + Vars + Trace = match e {
+  Num(n) -> n
+  Var(name) -> Vars.lookup(name)
+  Neg(inner) -> 0 - eval(inner)
+  Bin(op, l, r) -> {
+    let a = eval(l)
+    let b = eval(r)
+    let v = apply(op, a, b)
+    Trace.step(char_to_string(op), a, b, v)
+    v
+  }
+}
+
+fn show_expr(e: Expr) : String = match e {
+  Num(n) -> "#{n}"
+  Var(name) -> name
+  Neg(inner) -> "-#{show_expr(inner)}"
+  Bin(op, l, r) -> "(#{show_expr(l)} #{op} #{show_expr(r)})"
+}
+
+# --- handlers ----------------------------------------------------------
+
+fn find_var(env: [(String, Int)], name: String) : Option[Int] =
+  env |> list.find((p) => p.fst == name) |> option.map(.snd)
+
+fn with_env(env: [(String, Int)], body: () -> Int / Fail + Vars + Trace) : Int / Fail + Trace =
+  handle { body() } with Vars {
+    lookup(name, resume) -> match find_var(env, name) {
+      Some(v) -> resume(v)
+      None    -> Fail.fail("unknown variable '#{name}'")
+    }
+  }
+
+fn quietly(body: () -> Int / Fail + Trace) : Int / Fail =
+  handle { body() } with Trace {
+    step(op, a, b, r, resume) -> resume(())
+  }
+
+fn loudly(body: () -> Int / Fail + Trace) : Int / Fail + Stdout =
+  handle { body() } with Trace {
+    step(op, a, b, r, resume) -> {
+      println("      #{a} #{op} #{b} = #{r}")
+      resume(())
+    }
+  }
+
+fn calculate(src: String, env: [(String, Int)]) : String =
+  handle {
+    let e = parse(src)
+    let v = quietly { with_env(env) { eval(e) } }
+    "#{show_expr(e)} = #{v}"
+  } with Fail {
+    fail(msg, resume) -> "error: #{msg}"
+  }
+
+fn main() : Unit / Stdout = {
+  let env = [("x", 7), ("y", 2), ("answer", 42)]
+  println("A calculator whose evaluator only performs effects:")
+  println("  Fail  (non-resuming) turns any parse or runtime error into a message")
+  println("  Vars  (resuming)     answers variable lookups from an environment")
+  println("  Trace (resuming)     is silenced or printed by swapping one handler")
+  println("")
+  println("with x = 7, y = 2, answer = 42")
+  println("")
+  [
+    "1 + 2 * 3",
+    "(1 + 2) * 3",
+    "x * x + y",
+    "2 ^ 3 ^ 2",
+    "-answer % 5 + 10",
+    "100 / (y - 2)",
+    "z + 1",
+    "2 * (3 + )",
+    "4 $ 4",
+  ] |! println("  #{.:<18} #{calculate(., env)}")
+  println("")
+  println("Tracing  2 ^ 10 - 3 * x - answer  one step at a time:")
+  let traced = handle {
+    let e = parse("2 ^ 10 - 3 * x - answer")
+    loudly { with_env(env) { eval(e) } }
+  } with Fail {
+    fail(msg, resume) -> 0 - 1
+  }
+  println("  result: #{traced}")
+}

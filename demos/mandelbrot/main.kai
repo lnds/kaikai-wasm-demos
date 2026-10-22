@@ -1,0 +1,34 @@
+const WIDTH : Int = 72
+const HEIGHT : Int = 28
+const MAX_ITER : Int = 200
+const PALETTE : String = " .:-=+*#%@"
+
+fn escape_time(cr: Real, ci: Real, zr: Real, zi: Real, n: Int) : Int =
+  if n >= MAX_ITER or zr * zr + zi * zi > 4.0 {
+    n
+  } else {
+    escape_time(cr, ci, zr * zr - zi * zi + cr, 2.0 * zr * zi + ci, n + 1)
+  }
+
+fn shade(n: Int) : String =
+  if n >= MAX_ITER {
+    "@"
+  } else {
+    let k = n / 2
+    let i = if k > string_length(PALETTE) - 2 { string_length(PALETTE) - 2 } else { k }
+    string.slice(PALETTE, i, 1)
+  }
+
+fn pixel(row: Int, col: Int) : String = {
+  let cr = -2.2 + 3.2 * int_to_real(col) / int_to_real(WIDTH)
+  let ci = -1.2 + 2.4 * (int_to_real(row) + 0.5) / int_to_real(HEIGHT)
+  shade(escape_time(cr, ci, 0.0, 0.0, 0))
+}
+
+fn line(row: Int) : String = [0..WIDTH - 1] | pixel(row, .) |> string.join("")
+
+fn main() : Unit / Stdout = {
+  println("Mandelbrot set, #{WIDTH}x#{HEIGHT}, #{MAX_ITER} iterations")
+  println("")
+  [0..HEIGHT - 1] |! println(line(.))
+}

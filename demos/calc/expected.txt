@@ -1,0 +1,23 @@
+A calculator whose evaluator only performs effects:
+  Fail  (non-resuming) turns any parse or runtime error into a message
+  Vars  (resuming)     answers variable lookups from an environment
+  Trace (resuming)     is silenced or printed by swapping one handler
+
+with x = 7, y = 2, answer = 42
+
+  1 + 2 * 3          (1 + (2 * 3)) = 7
+  (1 + 2) * 3        ((1 + 2) * 3) = 9
+  x * x + y          ((x * x) + y) = 51
+  2 ^ 3 ^ 2          (2 ^ (3 ^ 2)) = 512
+  -answer % 5 + 10   ((-answer % 5) + 10) = 8
+  100 / (y - 2)      error: division by zero
+  z + 1              error: unknown variable 'z'
+  2 * (3 + )         error: expected a value but found ')'
+  4 $ 4              error: unexpected character '$'
+
+Tracing  2 ^ 10 - 3 * x - answer  one step at a time:
+      2 ^ 10 = 1024
+      3 * 7 = 21
+      1024 - 21 = 1003
+      1003 - 42 = 961
+  result: 961

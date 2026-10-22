@@ -1,0 +1,63 @@
+const W : Int = 38
+const H : Int = 14
+const GENERATIONS : Int = 6
+const STEP : Int = 4
+
+type Board = { w: Int, h: Int, cells: Vec[Bool] }
+
+fn index(b: Board, x: Int, y: Int) : Int =
+  ((y + b.h) % b.h) * b.w + (x + b.w) % b.w
+
+fn alive(b: Board, x: Int, y: Int) : Bool = b.cells[index(b, x, y)]
+
+fn neighbours(b: Board, x: Int, y: Int) : Int =
+  [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    |? alive(b, x + .fst, y + .snd)
+    |> length()
+
+fn next_cell(b: Board, i: Int) : Bool = {
+  let x = i % b.w
+  let y = i / b.w
+  let n = neighbours(b, x, y)
+  n == 3 or (n == 2 and alive(b, x, y))
+}
+
+fn step(b: Board) : Board = {
+  let cells: Vec[Bool] = [0..b.w * b.h - 1] | next_cell(b, .)
+  Board { ...b, cells: cells }
+}
+
+fn advance(b: Board, n: Int) : Board = if n == 0 { b } else { advance(step(b), n - 1) }
+
+fn population(b: Board) : Int = [0..b.w * b.h - 1] |? b.cells[.] |> length()
+
+fn row(b: Board, y: Int) : String =
+  [0..b.w - 1] | (x => if alive(b, x, y) { "#" } else { "·" }) |> string.join("")
+
+fn render(b: Board, gen: Int) : Unit / Stdout = {
+  println("generation #{gen:3}   population #{population(b)}")
+  [0..b.h - 1] |! println(row(b, .))
+  println("")
+}
+
+fn seed(w: Int, h: Int, live: [(Int, Int)]) : Board = {
+  let cells: Vec[Bool] = [0..w * h - 1]
+    | (i => live |> list.any((p) => p.fst == i % w and p.snd == i / w))
+  Board { w, h, cells }
+}
+
+fn show_run(b: Board, gen: Int) : Unit / Stdout =
+  if gen <= GENERATIONS * STEP {
+    render(b, gen)
+    show_run(advance(b, STEP), gen + STEP)
+  }
+
+fn main() : Unit / Stdout = {
+  println("Conway's Game of Life on a #{W}x#{H} torus")
+  println("a glider, a blinker and an R-pentomino, every #{STEP} generations")
+  println("")
+  let glider = [(1, 0), (2, 1), (0, 2), (1, 2), (2, 2)]
+  let blinker = [(32, 2), (33, 2), (34, 2)]
+  let r_pentomino = [(20, 6), (21, 6), (19, 7), (20, 7), (20, 8)]
+  show_run(seed(W, H, glider ++ blinker ++ r_pentomino), 0)
+}

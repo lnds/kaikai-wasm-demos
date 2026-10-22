@@ -1,0 +1,26 @@
+The N-queens puzzle: place N queens so that none attacks another
+
+  N =  1      1 solutions
+  N =  2      0 solutions
+  N =  3      0 solutions
+  N =  4      2 solutions
+  N =  5     10 solutions
+  N =  6      4 solutions
+  N =  7     40 solutions
+  N =  8     92 solutions
+  N =  9    352 solutions
+  N = 10    724 solutions
+
+First solution on the 8x8 board:
+
+  ┌─────────────────┐
+8 │ ♛ ░ · ░ · ░ · ░ │
+7 │ ░ · ░ · ♛ · ░ · │
+6 │ · ░ · ░ · ░ · ♛ │
+5 │ ░ · ░ · ░ ♛ ░ · │
+4 │ · ░ ♛ ░ · ░ · ░ │
+3 │ ░ · ░ · ░ · ♛ · │
+2 │ · ♛ · ░ · ░ · ░ │
+1 │ ░ · ░ ♛ ░ · ░ · │
+  └─────────────────┘
+    a b c d e f g h

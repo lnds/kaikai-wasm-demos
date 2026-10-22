@@ -1,0 +1,60 @@
+const COLS : Int = 72
+const ROWS : Int = 19
+const PI : Real = 3.141592653589793
+
+type Curve = { glyph: String, f: (Real) -> Real }
+
+fn x_at(col: Int, x0: Real, x1: Real) : Real =
+  x0 + (x1 - x0) * int_to_real(col) / int_to_real(COLS - 1)
+
+fn row_of(y: Real, lo: Real, hi: Real) : Int =
+  real_to_int((hi - y) / (hi - lo) * int_to_real(ROWS - 1) + 0.5)
+
+fn background(row: Int, col: Int, zero_row: Int) : String =
+  if col == 0 and row == zero_row { "┼" }
+  else if col == 0 { "│" }
+  else if row == zero_row { "─" }
+  else { " " }
+
+fn glyph_at(curves: [Curve], row: Int, col: Int, x: Real, lo: Real, hi: Real) : Option[String] =
+  curves
+    |? row_of(.f(x), lo, hi) == row
+    | .glyph
+    |> list.head()
+
+fn plot_row(curves: [Curve], row: Int, x0: Real, x1: Real, lo: Real, hi: Real) : String = {
+  let zero_row = row_of(0.0, lo, hi)
+  [0..COLS - 1]
+    | (col => glyph_at(curves, row, col, x_at(col, x0, x1), lo, hi) ?? background(row, col, zero_row))
+    |> string.join("")
+}
+
+fn plot(title: String, curves: [Curve], x0: Real, x1: Real, lo: Real, hi: Real) : Unit / Stdout = {
+  println(title)
+  println("")
+  [0..ROWS - 1] |! println("#{label(., lo, hi)} #{plot_row(curves, ., x0, x1, lo, hi)}")
+  println("       #{x0:<8.2}#{string.repeat(" ", COLS - 16)}#{x1:>8.2}")
+  println("")
+}
+
+fn label(row: Int, lo: Real, hi: Real) : String =
+  if row == 0 { "#{hi:6.2}" }
+  else if row == ROWS - 1 { "#{lo:6.2}" }
+  else { "      " }
+
+fn main() : Unit / Stdout = {
+  plot(
+    "sin x (*) and cos x (o) over one period",
+    [Curve { glyph: "*", f: (x) => real_sin(x) }, Curve { glyph: "o", f: (x) => real_cos(x) }],
+    0.0, 2.0 * PI, -1.0, 1.0,
+  )
+  plot(
+    "a damped oscillation e^(-x/4) sin 2x (#) inside its envelope (.)",
+    [
+      Curve { glyph: "#", f: (x) => real_exp(0.0 - x / 4.0) * real_sin(2.0 * x) },
+      Curve { glyph: ".", f: (x) => real_exp(0.0 - x / 4.0) },
+      Curve { glyph: ".", f: (x) => 0.0 - real_exp(0.0 - x / 4.0) },
+    ],
+    0.0, 3.0 * PI, -1.0, 1.0,
+  )
+}

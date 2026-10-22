@@ -1,0 +1,7 @@
+mandelbrot
+life
+primes
+maze
+queens
+plot
+calc

@@ -1,0 +1,57 @@
+const BOARD : Int = 8
+
+# A placement lists the column of the queen on each row, last row first.
+fn safe(cols: [Int], col: Int) : Bool = safe_from(cols, col, 1)
+
+fn safe_from(cols: [Int], col: Int, dist: Int) : Bool = match cols {
+  []        -> true
+  [c, ...t] -> if c == col or abs(c - col) == dist { false } else { safe_from(t, col, dist + 1) }
+}
+
+fn solve(n: Int, cols: [Int]) : [[Int]] =
+  if length(cols) == n {
+    [list.reverse(cols)]
+  } else {
+    [0..n - 1] |? safe(cols, .) || solve(n, [., ...cols])
+  }
+
+fn first_solution(n: Int, cols: [Int]) : Option[[Int]] =
+  if length(cols) == n {
+    Some(list.reverse(cols))
+  } else {
+    [0..n - 1] |? safe(cols, .) |> list.find_map((c) => first_solution(n, [c, ...cols]))
+  }
+
+fn square(row: Int, col: Int, queen: Int) : String =
+  if col == queen { " ♛" }
+  else if (row + col) % 2 == 0 { " ·" }
+  else { " ░" }
+
+fn rank(n: Int, row: Int, queen: Int) : String = {
+  let squares = [0..n - 1] | square(row, ., queen) |> string.join("")
+  "#{n - row} │#{squares} │"
+}
+
+fn draw(solution: [Int]) : Unit / Stdout = {
+  let n = length(solution)
+  let files = ['a'..'z'] |> list.take(n) | " #{.}" |> string.join("")
+  println("  ┌#{string.repeat("──", n)}─┐")
+  list.enumerate(solution) |! println(rank(n, .fst, .snd))
+  println("  └#{string.repeat("──", n)}─┘")
+  println("   #{files}")
+}
+
+fn main() : Unit / Stdout = {
+  println("The N-queens puzzle: place N queens so that none attacks another")
+  println("")
+  [1..10] |! println("  N = #{.:2}   #{length(solve(., [])):4} solutions")
+  println("")
+  match first_solution(BOARD, []) {
+    Some(sol) -> {
+      println("First solution on the #{BOARD}x#{BOARD} board:")
+      println("")
+      draw(sol)
+    }
+    None -> println("no solution")
+  }
+}

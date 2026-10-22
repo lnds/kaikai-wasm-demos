@@ -1,0 +1,118 @@
+const W : Int = 20
+const H : Int = 10
+const SEED : Int = 2026
+
+type Maze = { right: Vec[Bool], down: Vec[Bool] }
+
+# The ANSI C linear congruential generator; products stay below 2^62.
+fn next_random(x: Int) : Int = (x * 1103515245 + 12345) % 2147483648
+
+fn blank(n: Int) : Vec[Bool] = {
+  let v: Vec[Bool] = [1..n] | ((i) => false)
+  v
+}
+
+fn neighbours(c: Int) : [Int] = {
+  let x = c % W
+  let y = c / W
+  [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)]
+    |? (.fst >= 0 and .fst < W and .snd >= 0 and .snd < H)
+    | (.snd * W + .fst)
+}
+
+fn connect(m: Maze, a: Int, b: Int) : Maze = {
+  let lo = if a < b { a } else { b }
+  let hi = if a < b { b } else { a }
+  if hi - lo == 1 { Maze { ...m, right: vec_set(m.right, lo, true) } }
+  else { Maze { ...m, down: vec_set(m.down, lo, true) } }
+}
+
+fn linked(m: Maze, a: Int, b: Int) : Bool = {
+  let lo = if a < b { a } else { b }
+  let hi = if a < b { b } else { a }
+  if hi - lo == 1 { m.right[lo] } else { m.down[lo] }
+}
+
+# Depth-first backtracker with an explicit stack: one tail call per step.
+fn carve(m: Maze, seen: Vec[Bool], stack: [Int], rng: Int) : Maze = match stack {
+  [] -> m
+  [cur, ...rest] -> {
+    let fresh = neighbours(cur) |? (i => not seen[i])
+    match fresh {
+      [] -> carve(m, seen, rest, rng)
+      _ -> {
+        let r = next_random(rng)
+        let pick = list.nth(fresh, (r / 65536) % length(fresh)) ?? cur
+        carve(connect(m, cur, pick), vec_set(seen, pick, true), [pick, ...stack], r)
+      }
+    }
+  }
+}
+
+# Breadth-first search; `from` records each cell's predecessor (-1 = unseen).
+fn bfs(m: Maze, front: [Int], back: [Int], from: Vec[Int]) : Vec[Int] = match front {
+  [] -> match back {
+    [] -> from
+    _  -> bfs(m, list.reverse(back), [], from)
+  }
+  [cur, ...rest] -> {
+    let next = neighbours(cur) |? (i => from[i] < 0 and linked(m, cur, i))
+    let from2 = next |> list.foldl(from, (acc, i) => vec_set(acc, i, cur))
+    bfs(m, rest, [...next, ...back], from2)
+  }
+}
+
+fn walk_back(from: Vec[Int], c: Int, acc: [Int]) : [Int] =
+  if c == 0 { [0, ...acc] } else { walk_back(from, from[c], [c, ...acc]) }
+
+fn grid_index(gx: Int, gy: Int) : Int = gy * (2 * W + 1) + gx
+
+fn cell_center(c: Int) : Int = grid_index(2 * (c % W) + 1, 2 * (c / W) + 1)
+
+fn mark_path(path: [Int], grid: Vec[Bool]) : Vec[Bool] = match path {
+  [a, b, ...rest] -> {
+    let mid = (cell_center(a) + cell_center(b)) / 2
+    let g = vec_set(vec_set(grid, cell_center(a), true), mid, true)
+    mark_path([b, ...rest], g)
+  }
+  [a] -> vec_set(grid, cell_center(a), true)
+  [] -> grid
+}
+
+fn is_open(m: Maze, gx: Int, gy: Int) : Bool =
+  if gy == 0 { gx == 1 }
+  else if gy == 2 * H { gx == 2 * W - 1 }
+  else if gx % 2 == 1 and gy % 2 == 1 { true }
+  else if gx % 2 == 0 and gy % 2 == 1 {
+    gx > 0 and gx < 2 * W and m.right[(gy / 2) * W + gx / 2 - 1]
+  }
+  else if gx % 2 == 1 and gy % 2 == 0 { m.down[(gy / 2 - 1) * W + gx / 2] }
+  else { false }
+
+fn glyph(m: Maze, path: Vec[Bool], gx: Int, gy: Int) : String =
+  if not is_open(m, gx, gy) { "██" }
+  else if path[grid_index(gx, gy)] { "░░" }
+  else { "  " }
+
+fn draw(m: Maze, path: Vec[Bool]) : Unit / Stdout =
+  [0..2 * H] |! println(row(m, path, .))
+
+fn row(m: Maze, path: Vec[Bool], gy: Int) : String =
+  [0..2 * W] | glyph(m, path, ., gy) |> string.join("")
+
+fn main() : Unit / Stdout = {
+  let empty = Maze { right: blank(W * H), down: blank(W * H) }
+  let maze = carve(empty, vec_set(blank(W * H), 0, true), [0], SEED)
+  let unseen: Vec[Int] = [1..W * H] | ((i) => 0 - 1)
+  let from = bfs(maze, [0], [], vec_set(unseen, 0, 0))
+  let route = walk_back(from, W * H - 1, [])
+  let grid_size = (2 * W + 1) * (2 * H + 1)
+  println("A #{W}x#{H} maze carved by a depth-first backtracker (seed #{SEED})")
+  println("")
+  draw(maze, blank(grid_size))
+  println("")
+  println("Solved by breadth-first search: #{length(route)} cells from entrance to exit")
+  println("")
+  let doors = vec_set(vec_set(blank(grid_size), grid_index(1, 0), true), grid_index(2 * W - 1, 2 * H), true)
+  draw(maze, mark_path(route, doors))
+}
