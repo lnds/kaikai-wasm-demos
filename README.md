@@ -61,7 +61,7 @@ A console demo is a plain program that computes and prints: what it writes to `S
 
 ## Requirements
 
-- **kaikai main (next release)**: `kai build --target=wasm32-browser` with `extern "js"` and the
+- **kaikai 0.172.0 or later**: `kai build --target=wasm32-browser` with `extern "js"` and the
   browser stdlib (`web.run`, `web.dom`, `web.timer`, `web.storage`). Use the first kaikai release
   that ships them, or later. The first wasm build downloads wasi-sdk 34 into the user cache and
   verifies its checksum.
