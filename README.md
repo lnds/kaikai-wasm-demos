@@ -62,8 +62,8 @@ A console demo is a plain program that computes and prints: what it writes to `S
 ## Requirements
 
 - **kaikai 0.172.0 or later**: `kai build --target=wasm32-browser` with `extern "js"` and the
-  browser stdlib (`web.run`, `web.dom`, `web.timer`, `web.storage`). Use the first kaikai release
-  that ships them, or later. The first wasm build downloads wasi-sdk 34 into the user cache and
+  browser stdlib (`web.run`, `web.dom`, `web.timer`, `web.storage`).
+  The first wasm build downloads wasi-sdk 34 into the user cache and
   verifies its checksum.
 - A browser with WebAssembly exception handling (exnref). A page that suspends (one that waits
   for events, frames or sleeps: every page in the first section) also needs JavaScript Promise
