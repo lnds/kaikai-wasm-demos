@@ -1,0 +1,190 @@
+import time
+
+const W : Int = 36
+
+const H : Int = 22
+
+const S : Real = 12.0
+
+const CARVE_PER_FRAME : Int = 6
+
+const PATH_PER_FRAME : Int = 3
+
+const WALL : String = "#0b0e14"
+
+const FLOOR : String = "#2a3040"
+
+const HEAD : String = "#f08a5d"
+
+const ROUTE : String = "#fff4d6"
+
+extern "js" opaque Node
+
+extern "js" opaque Ctx
+
+extern "js"("document.getElementById") fn element(id: String) : Node / Js
+
+extern "js"(".getContext") fn context(canvas: Node, kind: String) : Ctx / Js
+
+extern "js"(".textContent=") fn set_text(n: Node, s: String) : Unit / Js
+
+extern "js"(".fillStyle=") fn fill_style(ctx: Ctx, css: String) : Unit / Js
+
+extern "js"(".fillRect") fn fill_rect(ctx: Ctx, x: Real, y: Real, w: Real, h: Real) : Unit / Js
+
+type Maze = { right: Vec[Bool], down: Vec[Bool] }
+
+type Carver = { maze: Maze, seen: Vec[Bool], stack: [Int], rng: Int }
+
+# The ANSI C linear congruential generator; products stay below 2^62.
+fn next_random(x: Int) : Int = (x * 1103515245 + 12345) % 2147483648
+
+fn blank(n: Int) : Vec[Bool] {
+  let v: Vec[Bool] = [1..n] | (i => false)
+  v
+}
+
+fn neighbours(c: Int) : [Int] {
+  let x = c % W
+  let y = c / W
+  [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)]
+    |? (.fst >= 0 and .fst < W and .snd >= 0 and .snd < H)
+    | (.snd * W + .fst)
+}
+
+fn connect(m: Maze, a: Int, b: Int) : Maze {
+  let lo = min(a, b)
+  if max(a, b) - lo == 1 {
+    Maze { ...m, right: vec_set(m.right, lo, true) }
+  } else {
+    Maze { ...m, down: vec_set(m.down, lo, true) }
+  }
+}
+
+fn linked(m: Maze, a: Int, b: Int) : Bool {
+  let lo = min(a, b)
+  if max(a, b) - lo == 1 { m.right[lo] } else { m.down[lo] }
+}
+
+# Grid blocks: cell (x, y) sits at block (2x + 1, 2y + 1); the wall between
+# two cells is the block halfway between them.
+fn block(ctx: Ctx, gx: Int, gy: Int, css: String) : Unit / Js {
+  fill_style(ctx, css)
+  fill_rect(ctx, int_to_real(gx) * S, int_to_real(gy) * S, S, S)
+}
+
+fn c_x(c: Int) : Int = 2 * (c % W) + 1
+
+fn c_y(c: Int) : Int = 2 * (c / W) + 1
+
+fn cell(ctx: Ctx, c: Int, css: String) : Unit / Js = block(ctx, c_x(c), c_y(c), css)
+
+fn passage(ctx: Ctx, a: Int, b: Int, css: String) : Unit / Js =
+  block(ctx, (c_x(a) + c_x(b)) / 2, (c_y(a) + c_y(b)) / 2, css)
+
+# One move of the depth-first backtracker: step into a fresh neighbour, or back up.
+fn carve_step(ctx: Ctx, k: Carver) : Carver / Js = match k.stack {
+  [] -> k
+  [cur, ...rest] -> {
+    let fresh = neighbours(cur) |? (i => not k.seen[i])
+    cell(ctx, cur, FLOOR)
+    match fresh {
+      [] -> {
+        match rest {
+          [top, ..._] -> cell(ctx, top, HEAD)
+          [] -> ()
+        }
+        Carver { ...k, stack: rest }
+      }
+      _ -> {
+        let r = next_random(k.rng)
+        let pick = list.nth(fresh, r / 65536 % length(fresh)) ?? cur
+        passage(ctx, cur, pick, FLOOR)
+        cell(ctx, pick, HEAD)
+        Carver {
+          maze: connect(k.maze, cur, pick),
+          seen: vec_set(k.seen, pick, true),
+          stack: [pick, ...k.stack],
+          rng: r
+        }
+      }
+    }
+  }
+}
+
+fn carve_frame(ctx: Ctx, k: Carver, n: Int) : Carver / Js =
+  if n == 0 { k } else { carve_frame(ctx, carve_step(ctx, k), n - 1) }
+
+fn carve(ctx: Ctx, k: Carver) : Carver / Js + Clock =
+  match k.stack {
+    [] -> k
+    _ -> {
+      let k2 = carve_frame(ctx, k, CARVE_PER_FRAME)
+      sleep(millis(16))
+      carve(ctx, k2)
+    }
+  }
+
+# The flood's colour swings between teal and magenta with the distance.
+fn hue(d: Int) : String {
+  let k = d * 2 % 280
+  "hsl(#{180 + min(k, 280 - k)}, 60%, 42%)"
+}
+
+# Breadth-first search, one layer per frame; `from` holds each cell's
+# predecessor, -1 while unseen. A perfect maze is a tree, so no cell is
+# reached twice in one layer.
+fn flood(ctx: Ctx, m: Maze, front: [Int], from: Vec[Int], d: Int) : Vec[Int] / Js + Clock =
+  match front {
+    [] -> from
+    _ -> {
+      front
+        |! (c => {
+          cell(ctx, c, hue(d))
+          if from[c] != c { passage(ctx, c, from[c], hue(d)) }
+        })
+      let next =
+        front || (c => (neighbours(c) |? (i => from[i] < 0 and linked(m, c, i)) | (i => (i, c))))
+      let from2 = next |> list.foldl(from, (acc, p) => vec_set(acc, p.fst, p.snd))
+      sleep(millis(16))
+      flood(ctx, m, next | .fst, from2, d + 1)
+    }
+  }
+
+fn walk_back(from: Vec[Int], c: Int, acc: [Int]) : [Int] =
+  if from[c] == c { [c, ...acc] } else { walk_back(from, from[c], [c, ...acc]) }
+
+fn trace(ctx: Ctx, route: [Int], n: Int) : Unit / Js + Clock = match route {
+  [a, b, ...rest] -> {
+    cell(ctx, a, ROUTE)
+    passage(ctx, a, b, ROUTE)
+    if n % PATH_PER_FRAME == 0 { sleep(millis(16)) }
+    trace(ctx, [b, ...rest], n + 1)
+  }
+  [a] -> cell(ctx, a, ROUTE)
+  [] -> ()
+}
+
+fn round(ctx: Ctx, status: Node, seed: Int, n: Int) : Unit / Js + Clock {
+  fill_style(ctx, WALL)
+  fill_rect(ctx, 0.0, 0.0, int_to_real(2 * W + 1) * S, int_to_real(2 * H + 1) * S)
+  set_text(status, "maze #{n}: carving with a depth-first backtracker")
+  let empty = Maze { right: blank(W * H), down: blank(W * H) }
+  let carved =
+    carve(ctx, Carver { maze: empty, seen: vec_set(blank(W * H), 0, true), stack: [0], rng: seed })
+  block(ctx, 1, 0, FLOOR)
+  block(ctx, 2 * W - 1, 2 * H, FLOOR)
+  set_text(status, "maze #{n}: breadth-first search from the entrance")
+  let unseen: Vec[Int] = [1..(W * H)] | (i => -1)
+  let from = flood(ctx, carved.maze, [0], vec_set(unseen, 0, 0), 0)
+  let route = walk_back(from, W * H - 1, [])
+  block(ctx, 1, 0, ROUTE)
+  trace(ctx, route, 1)
+  block(ctx, 2 * W - 1, 2 * H, ROUTE)
+  set_text(status, "maze #{n}: solved, #{length(route)} cells from entrance to exit")
+  sleep(seconds(3))
+  round(ctx, status, carved.rng, n + 1)
+}
+
+fn main() : Unit / Js + Clock =
+  round(context(element("canvas"), "2d"), element("status"), 2026, 1)

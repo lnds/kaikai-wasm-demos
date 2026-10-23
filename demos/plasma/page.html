@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plasma · kaikai on WebAssembly</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<main>
+<a class="back" href="../">← all demos</a>
+<header>
+<h1>Plasma</h1>
+<p>The demoscene plasma: three moving sine fields summed per pixel and coloured through a rotating palette, at 30 frames a second.</p>
+</header>
+<section>
+<canvas id="canvas" class="stage" width="800" height="500"></canvas>
+<p id="status" class="status"></p>
+<pre id="kai-stdout" class="log"></pre>
+</section>
+<section>
+<h2>Source · plasma/main.kai</h2>
+<!-- source -->
+</section>
+<footer>Compiled from kaikai to WebAssembly with <code>kai build --target=wasm32-browser</code>.</footer>
+</main>
+<script type="module" src="app.mjs"></script>
+</body>
+</html>

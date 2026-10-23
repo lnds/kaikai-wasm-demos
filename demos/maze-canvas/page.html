@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maze on a canvas · kaikai on WebAssembly</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<main>
+<a class="back" href="../">← all demos</a>
+<header>
+<h1>Maze on a canvas</h1>
+<p>A maze carved live by a depth-first backtracker, flooded by breadth-first search and solved, then a new one, forever.</p>
+</header>
+<section>
+<canvas id="canvas" class="stage" width="876" height="540"></canvas>
+<p id="status" class="status"></p>
+<pre id="kai-stdout" class="log"></pre>
+</section>
+<section>
+<h2>Source · maze-canvas/main.kai</h2>
+<!-- source -->
+</section>
+<footer>Compiled from kaikai to WebAssembly with <code>kai build --target=wasm32-browser</code>.</footer>
+</main>
+<script type="module" src="app.mjs"></script>
+</body>
+</html>

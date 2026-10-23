@@ -19,12 +19,29 @@ blurb_of() {
   sed -n '2,$p' "$1/README.md" | sed '/^$/d' | head -n 1
 }
 
+source_block() {
+  printf '<pre class="source"><code>'
+  escape "$1/main.kai"
+  printf '</code></pre>\n'
+}
+
+# A demo's own page.html, with its `<!-- source -->` line replaced by the source.
+custom_page() {
+  dir="$1"
+  source_block "$dir" > "$SITE/.source.html"
+  awk -v src="$SITE/.source.html" '
+    /^<!-- source -->$/ { while ((getline line < src) > 0) print line; next }
+    { print }
+  ' "$dir/page.html"
+  rm -f "$SITE/.source.html"
+}
+
 demo_page() {
   dir="$1"
   name="$2"
   title="$(title_of "$dir" | escape)"
   blurb="$(blurb_of "$dir" | escape)"
-  cat <<EOF
+  cat <<PAGE
 <!doctype html>
 <html lang="en">
 <head>
@@ -46,51 +63,71 @@ demo_page() {
 </section>
 <section>
 <h2>Source · $name/main.kai</h2>
-<pre class="source"><code>$(escape "$dir/main.kai")</code></pre>
+$(source_block "$dir")
 </section>
 <footer>Compiled from kaikai to WebAssembly with <code>kai build --target=wasm32-browser</code>.</footer>
 </main>
 <script type="module" src="app.mjs"></script>
 </body>
 </html>
-EOF
+PAGE
 }
 
 card() {
   dir="$1"
   name="$2"
-  peek=""
-  if [ -f "$dir/expected.txt" ]; then
-    peek="$(head -n 14 "$dir/expected.txt" | escape)"
+  if [ -f "$dir/thumb.png" ]; then
+    preview="<img class=\"thumb\" src=\"$name/thumb.png\" alt=\"\" loading=\"lazy\">"
+  else
+    peek=""
+    if [ -f "$dir/expected.txt" ]; then
+      peek="$(head -n 14 "$dir/expected.txt" | escape)"
+    fi
+    preview="<pre class=\"peek\">$peek</pre>"
   fi
-  cat <<EOF
+  cat <<CARD
 <a class="card" href="$name/">
-<pre class="peek">$peek</pre>
+$preview
 <div class="body">
 <h2>$(title_of "$dir" | escape)</h2>
 <p>$(blurb_of "$dir" | escape)</p>
 </div>
 </a>
-EOF
+CARD
 }
 
 mkdir -p "$SITE"
 cp "$ROOT/web/style.css" "$SITE/style.css"
 
-cards=""
-for name in $(grep -v '^#' "$ROOT/demos.txt"); do
+canvas_cards=""
+console_cards=""
+section=console
+while read -r name; do
+  case "$name" in
+    "" | "#"*) continue ;;
+    "[canvas]") section=canvas; continue ;;
+    "[console]") section=console; continue ;;
+  esac
   dir="$ROOT/demos/$name"
   echo "build $name"
   mkdir -p "$SITE/$name"
-  "$KAI" build --target=wasm32-browser "$dir/main.kai" -o "$SITE/$name/app"
+  "$KAI" build --target=wasm32-browser "$dir/main.kai" -o "$SITE/$name/app" < /dev/null
   if [ -f "$dir/page.html" ]; then
-    cp "$dir/page.html" "$SITE/$name/index.html"
+    custom_page "$dir" > "$SITE/$name/index.html"
   else
     demo_page "$dir" "$name" > "$SITE/$name/index.html"
   fi
-  cards="$cards$(card "$dir" "$name")
+  if [ -f "$dir/thumb.png" ]; then
+    cp "$dir/thumb.png" "$SITE/$name/thumb.png"
+  fi
+  if [ "$section" = canvas ]; then
+    canvas_cards="$canvas_cards$(card "$dir" "$name")
 "
-done
+  else
+    console_cards="$console_cards$(card "$dir" "$name")
+"
+  fi
+done < "$ROOT/demos.txt"
 
 cat > "$SITE/index.html" <<EOF
 <!doctype html>
@@ -105,11 +142,17 @@ cat > "$SITE/index.html" <<EOF
 <main>
 <header>
 <h1>kaikai on WebAssembly</h1>
-<p>Small kaikai programs compiled to WebAssembly and run in your browser. Each one prints to the page.</p>
+<p>Small kaikai programs compiled to WebAssembly and run in your browser.</p>
 </header>
+<h2 class="section">Canvas</h2>
+<p class="intro">Animations drawn on a canvas through <code>extern "js"</code>, paced by <code>Clock.sleep</code> on the page's event loop.</p>
 <div class="gallery">
-$cards</div>
-<footer>Built with <code>kai build --target=wasm32-browser</code>. Interactive demos arrive with DOM support.</footer>
+$canvas_cards</div>
+<h2 class="section">Console</h2>
+<p class="intro">Programs that compute and print; what they write to <code>Stdout</code> lands on the page.</p>
+<div class="gallery">
+$console_cards</div>
+<footer>Built with <code>kai build --target=wasm32-browser</code>. Keyboard and mouse demos arrive with DOM events.</footer>
 </main>
 </body>
 </html>

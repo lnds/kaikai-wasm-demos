@@ -1,0 +1,136 @@
+import time
+
+const W : Int = 120
+
+const H : Int = 80
+
+const FADE : Int = 24
+
+const RESEED : Int = 1500
+
+const FRAME_NS : Int = 40_000_000
+
+extern "js" opaque Node
+
+extern "js" opaque Ctx
+
+extern "js" opaque Image
+
+extern "js"("document.getElementById") fn element(id: String) : Node / Js
+
+extern "js"(".getContext") fn context(canvas: Node, kind: String) : Ctx / Js
+
+extern "js"(".textContent=") fn set_text(n: Node, s: String) : Unit / Js
+
+extern "js"("pixels.image") fn image(w: I32, h: I32) : Image / Js
+
+extern "js"("pixels.set") fn set_pixel(img: Image, i: I32, rgb: I32) : Unit / Js
+
+extern "js"("pixels.show") fn show(ctx: Ctx, img: Image, smooth: Bool) : Unit / Js
+
+# A live cell has heat FADE; a dead one cools by one per generation, leaving a trail.
+type World = { cells: Vec[Bool], heat: Vec[Int] }
+
+# Patterns as text rows, `O` for a live cell.
+const GOSPER_GUN : [String] = [
+  "........................O...........",
+  "......................O.O...........",
+  "............OO......OO............OO",
+  "...........O...O....OO............OO",
+  "OO........O.....O...OO..............",
+  "OO........O...O.OO....O.O...........",
+  "..........O.....O.......O...........",
+  "...........O...O....................",
+  "............OO......................"
+]
+
+const ACORN : [String] = [".O.....", "...O...", "OO..OOO"]
+
+const R_PENTOMINO : [String] = [".OO", "OO.", ".O."]
+
+# Cells past the edge are dead: gliders leaving the board die there instead of
+# wrapping around into the gun.
+fn at(cells: Vec[Bool], x: Int, y: Int) : Int =
+  if x >= 0 and x < W and y >= 0 and y < H and cells[y * W + x] { 1 } else { 0 }
+
+fn neighbours(c: Vec[Bool], x: Int, y: Int) : Int =
+  at(c, x - 1, y - 1)
+    + at(c, x, y - 1)
+    + at(c, x + 1, y - 1)
+    + at(c, x - 1, y)
+    + at(c, x + 1, y)
+    + at(c, x - 1, y + 1)
+    + at(c, x, y + 1)
+    + at(c, x + 1, y + 1)
+
+fn next_cell(c: Vec[Bool], i: Int) : Bool {
+  let n = neighbours(c, i % W, i / W)
+  n == 3 or n == 2 and c[i]
+}
+
+fn step(w: World) : World {
+  let cells: Vec[Bool] = [0..(W * H - 1)] | next_cell(w.cells, .)
+  let heat: Vec[Int] = [0..(W * H - 1)] | (i => if cells[i] { FADE } else { max(w.heat[i] - 1, 0) })
+  World { cells, heat }
+}
+
+fn row_cells(row: String, y: Int) : [(Int, Int)] =
+  [0..(string_length(row) - 1)] |? (string.slice(row, ., 1) == "O") | (x => (x, y))
+
+fn live(rows: [String]) : [(Int, Int)] = rows |> list.enumerate() || row_cells(.snd, .fst)
+
+fn place(cells: Vec[Bool], rows: [String], ox: Int, oy: Int) : Vec[Bool] =
+  live(rows) |> list.foldl(cells, (acc, p) => vec_set(acc, (oy + p.snd) * W + ox + p.fst, true))
+
+fn seed() : World {
+  let empty: Vec[Bool] = [0..(W * H - 1)] | (i => false)
+  let cells = empty
+    |> place(GOSPER_GUN, 2, 2)
+    |> place(ACORN, 95, 20)
+    |> place(R_PENTOMINO, 20, 60)
+  let heat: Vec[Int] = [0..(W * H - 1)] | (i => if cells[i] { FADE } else { 0 })
+  World { cells, heat }
+}
+
+# Live cells are pale green; a trail cools from teal to the night-blue background.
+fn colour(heat: Int) : Int =
+  if heat == FADE {
+    0xC8FFB4
+  } else {
+    let t = int_to_real(heat) / int_to_real(FADE)
+    let r = 11 + real_to_int(t * 20.0)
+    let g = 14 + real_to_int(t * t * 150.0)
+    let b = 26 + real_to_int(t * 110.0)
+    r * 65536 + g * 256 + b
+  }
+
+fn population(w: World) : Int = [0..(W * H - 1)] |? w.cells[.] |> length()
+
+fn render(ctx: Ctx, img: Image, w: World) : Unit / Js {
+  [0..(W * H - 1)] |! set_pixel(img, ., colour(w.heat[.]))
+  show(ctx, img, false)
+}
+
+# Sleeps until `due` (monotonic nanoseconds), or one animation frame when late,
+# and returns the next deadline.
+fn pace(due: Int) : Int / Clock {
+  let now = instant_to_nanos(monotonic())
+  if due > now { sleep(nanos_dur(due - now)) } else { sleep(millis(1)) }
+  max(due, now) + FRAME_NS
+}
+
+type Screen = { ctx: Ctx, img: Image, status: Node }
+
+# The soup settles after a couple of thousand generations, so the board starts over.
+fn run(s: Screen, w: World, gen: Int, due: Int) : Unit / Js + Clock {
+  render(s.ctx, s.img, w)
+  set_text(s.status, "generation #{gen} · population #{population(w)}")
+  let next = if gen == RESEED { seed() } else { step(w) }
+  run(s, next, if gen == RESEED { 0 } else { gen + 1 }, pace(due))
+}
+
+fn main() : Unit / Js + Clock {
+  let screen =
+    Screen { ctx: context(element("canvas"), "2d"), img: image(W, H), status: element("status") }
+  run(screen, seed(), 0, instant_to_nanos(monotonic()))
+}

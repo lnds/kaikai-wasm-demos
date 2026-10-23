@@ -1,3 +1,10 @@
+# Gallery order. `[canvas]` and `[console]` start the two sections.
+[canvas]
+mandelbrot-canvas
+life-canvas
+plasma
+maze-canvas
+[console]
 mandelbrot
 life
 primes

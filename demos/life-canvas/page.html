@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Life on a canvas · kaikai on WebAssembly</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<main>
+<a class="back" href="../">← all demos</a>
+<header>
+<h1>Life on a canvas</h1>
+<p>Conway's Game of Life on a 120×80 board at 25 generations a second: a Gosper glider gun fires across the chaos of an acorn and an R-pentomino.</p>
+</header>
+<section>
+<canvas id="canvas" class="stage" width="720" height="480"></canvas>
+<p id="status" class="status"></p>
+<pre id="kai-stdout" class="log"></pre>
+</section>
+<section>
+<h2>Source · life-canvas/main.kai</h2>
+<!-- source -->
+</section>
+<footer>Compiled from kaikai to WebAssembly with <code>kai build --target=wasm32-browser</code>.</footer>
+</main>
+<script type="module" src="app.mjs"></script>
+</body>
+</html>
