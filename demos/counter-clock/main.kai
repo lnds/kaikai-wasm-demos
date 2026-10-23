@@ -1,0 +1,47 @@
+import web.dom
+import web.run
+import web.timer
+
+# `Date()` called without `new` returns the local date and time as text.
+extern "js"("Date") fn local_date() : String / Js
+
+type Face = { time: Node, date: Node, count: Node, last: Node }
+
+fn now_text() : (String, String) / Js {
+  let words = string.split(local_date(), " ")
+  (list.nth(words, 4) ?? "", string.join(list.take(words, 4), " "))
+}
+
+fn plural(n: Int) : String = if n == 1 { "1 click" } else { "#{n} clicks" }
+
+# Ticks and clicks arrive on the same queue, as values; the loop waits for the next one.
+fn run_face(f: Face, shown: String, clicks: Int) : Unit / Dom + Js {
+  let e = Dom.next_event()
+  let now = now_text()
+  if e.kind == "click" {
+    Dom.set_text(f.count, plural(clicks + 1))
+    Dom.set_text(f.last, "last click at #{now.fst}")
+    run_face(f, shown, clicks + 1)
+  } else if now.fst != shown {
+    Dom.set_text(f.time, now.fst)
+    Dom.set_text(f.date, now.snd)
+    run_face(f, now.fst, clicks)
+  } else {
+    run_face(f, shown, clicks)
+  }
+}
+
+fn element(id: String) : Node / Dom = Dom.query("##{id}") ?? Dom.create("span")
+
+fn main() : Unit / Js + Ffi + Clock =
+  run.run(() => {
+    let face = Face {
+      time: element("time"),
+      date: element("date"),
+      count: element("count"),
+      last: element("last")
+    }
+    Dom.listen(element("click"), "click")
+    Timer.every(200, "tick")
+    run_face(face, "", 0)
+  })

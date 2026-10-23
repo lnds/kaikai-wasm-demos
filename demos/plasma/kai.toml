@@ -1,5 +1,0 @@
-name = "plasma"
-version = "0.1.0"
-
-[js]
-module = "../../web/canvas.mjs"

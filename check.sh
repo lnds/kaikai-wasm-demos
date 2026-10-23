@@ -2,8 +2,9 @@
 # Builds each demo in demos.txt for wasm32-browser and runs it under node.
 # A console demo's output is diffed against demos/<name>/expected.txt, the
 # output of `kai run` on the host; a console demo without expected.txt is only
-# built. A canvas demo runs for a few seconds against a stub page
-# (web/smoke.mjs) and passes when it draws without throwing.
+# built. A page demo runs for a few seconds against a stub document
+# (web/smoke.mjs), fed the events in its smoke.json when it has one, and passes
+# when it draws or meets its expectations without throwing.
 # Usage: ./check.sh [--update] [name...]   (KAI=path/to/kai)
 #   --update  rewrites expected.txt from `kai run` before checking.
 set -u
@@ -45,6 +46,17 @@ run_node() {
   fi
 }
 
+smoke() {
+  if node $JSPI "$ROOT/web/smoke.mjs" "$1/app.wasm" 4 ${2:-} > "$1/smoke.txt" 2>&1; then
+    return 0
+  fi
+  if grep -q exnref "$1/smoke.txt"; then
+    node $JSPI --experimental-wasm-exnref "$ROOT/web/smoke.mjs" "$1/app.wasm" 4 ${2:-} > "$1/smoke.txt" 2>&1
+  else
+    return 1
+  fi
+}
+
 pass=0
 fail=0
 skip=0
@@ -61,7 +73,9 @@ for name in "$@"; do
     echo "FAIL $name: build"; cat "$build/build.txt"; fail=$((fail + 1)); continue
   fi
   if is_canvas "$name"; then
-    if node $JSPI "$ROOT/web/smoke.mjs" "$build/app.wasm" 2 > "$build/smoke.txt" 2>&1; then
+    script=""
+    [ -f "$dir/smoke.json" ] && script="$dir/smoke.json"
+    if smoke "$build" $script; then
       echo "ok   $name ($(cat "$build/smoke.txt"))"
       pass=$((pass + 1))
     else

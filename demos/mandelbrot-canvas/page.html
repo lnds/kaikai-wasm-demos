@@ -11,7 +11,7 @@
 <a class="back" href="../">← all demos</a>
 <header>
 <h1>Mandelbrot on a canvas</h1>
-<p>The Mandelbrot set with smooth escape-time colouring, filled in row by row.</p>
+<p>The Mandelbrot set with smooth escape-time colouring, filled in a band of rows per frame: each animation frame computes rows for a few milliseconds and draws the RGBA buffer with one <code>Dom.put_pixels</code>.</p>
 </header>
 <section>
 <canvas id="canvas" class="stage" width="600" height="400"></canvas>

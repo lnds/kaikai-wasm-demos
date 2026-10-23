@@ -1,0 +1,10 @@
+{
+  "events": [
+    { "at": 400, "type": "keydown", "key": " " },
+    { "at": 900, "type": "keydown", "key": "ArrowUp" },
+    { "at": 1400, "type": "keydown", "key": "ArrowLeft" },
+    { "at": 1900, "type": "keydown", "key": "p" },
+    { "at": 2300, "type": "keydown", "key": "p" }
+  ],
+  "expect": { "#score": "0", "#best": "0" }
+}

@@ -1,9 +1,12 @@
 # Gallery order. `[canvas]` and `[console]` start the two sections.
 [canvas]
+snake
+mandelbrot-zoom
 mandelbrot-canvas
 life-canvas
 plasma
 maze-canvas
+counter-clock
 [console]
 mandelbrot
 life

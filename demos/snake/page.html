@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Snake · kaikai on WebAssembly</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<main>
+<a class="back" href="../">← all demos</a>
+<header>
+<h1>Snake</h1>
+<p>The classic, steered from the keyboard. The game is an immutable record stepped by a pure function; keys arrive as values from <code>Dom.poll_event</code>, the clock is <code>Timer.animation_frame</code>, and the best score lives in <code>Storage</code>.</p>
+</header>
+<section>
+<div class="hud">
+<span>Score <b id="score">0</b></span>
+<span>Best <b id="best">0</b></span>
+<span class="keys"><kbd>Space</kbd> start · pause &nbsp; <kbd>←</kbd><kbd>↑</kbd><kbd>↓</kbd><kbd>→</kbd> or <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> steer</span>
+</div>
+<canvas id="board" class="stage game" width="672" height="504" tabindex="0"></canvas>
+<pre id="kai-stdout" class="log"></pre>
+</section>
+<section>
+<h2>Source · snake/main.kai</h2>
+<!-- source -->
+</section>
+<footer>Compiled from kaikai to WebAssembly with <code>kai build --target=wasm32-browser</code>. Needs JSPI: Chrome/Edge 137, Firefox 153, Safari 27.</footer>
+</main>
+<script type="module" src="app.mjs"></script>
+</body>
+</html>

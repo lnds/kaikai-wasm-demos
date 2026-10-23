@@ -1,5 +1,8 @@
-import math.real
-import time
+import bin
+import math.real as real
+import web.dom
+import web.run
+import web.timer
 
 const W : Int = 600
 
@@ -7,30 +10,7 @@ const H : Int = 400
 
 const MAX_ITER : Int = 500
 
-extern "js" opaque Node
-
-extern "js" opaque Ctx
-
-extern "js" opaque Image
-
-extern "js"("document.getElementById") fn element(id: String) : Node / Js
-
-extern "js"(".getContext") fn context(canvas: Node, kind: String) : Ctx / Js
-
-extern "js"("pixels.image") fn image(w: I32, h: I32) : Image / Js
-
-extern "js"("pixels.set") fn set_pixel(img: Image, i: I32, rgb: I32) : Unit / Js
-
-extern "js"(".putImageData") fn put_rows(
-  ctx: Ctx,
-  img: Image,
-  x: I32,
-  y: I32,
-  dx: I32,
-  dy: I32,
-  dw: I32,
-  dh: I32
-) : Unit / Js
+const BUDGET_MS : Int = 12
 
 type Stop = { at: Real, r: Real, g: Real, b: Real }
 
@@ -77,23 +57,44 @@ fn colour(mu: Real) : Int =
     blend(STOPS, s - real.floor(s))
   }
 
-fn pixel(x: Int, y: Int) : Int {
+fn colour_at(x: Int, y: Int) : Int {
   let cr = (-2.3) + 3.45 * int_to_real(x) / int_to_real(W)
   let ci = (-1.15) + 2.3 * int_to_real(y) / int_to_real(H)
   colour(escape(cr, ci, 0.0, 0.0, 0))
 }
 
-fn row(img: Image, y: Int) : Unit / Js =
-  [0..(W - 1)] |! set_pixel(img, y * W + ., pixel(., y))
+fn put(px: Array[Byte], i: Int, rgb: Int) : Unit / Mutable {
+  px[i * 4] := bin.byte(rgb / 65536)
+  px[i * 4 + 1] := bin.byte(rgb / 256 % 256)
+  px[i * 4 + 2] := bin.byte(rgb % 256)
+  px[i * 4 + 3] := 255u8
+}
 
-# A sleep of zero returns at once; one millisecond waits for the next animation
-# frame, which shows the new row.
-fn draw(ctx: Ctx, img: Image, y: Int) : Unit / Js + Clock =
-  if y < H {
-    row(img, y)
-    put_rows(ctx, img, 0, 0, 0, y, W, 1)
-    sleep(millis(1))
-    draw(ctx, img, y + 1)
+fn row(px: Array[Byte], y: Int, x: Int) : Unit / Mutable =
+  if x < W {
+    put(px, y * W + x, colour_at(x, y))
+    row(px, y, x + 1)
   }
 
-fn main() : Unit / Js + Clock = draw(context(element("canvas"), "2d"), image(W, H), 0)
+fn rows(px: Array[Byte], y: Int, deadline: Int) : Int / Timer + Mutable =
+  if y < H and Timer.now_ms() < deadline {
+    row(px, y, 0)
+    rows(px, y + 1, deadline)
+  } else {
+    y
+  }
+
+# Each animation frame computes rows for BUDGET_MS and shows them with one put_pixels.
+fn draw(ctx: Ctx2d, px: Array[Byte], y: Int) : Unit / Dom + Timer + Mutable =
+  if y < H {
+    let next = rows(px, y, Timer.now_ms() + BUDGET_MS)
+    Dom.put_pixels(ctx, px, W, H, 0, 0)
+    Timer.animation_frame() |> ignore
+    draw(ctx, px, next)
+  }
+
+fn main() : Unit / Js + Ffi + Clock + Mutable =
+  run.run(() => {
+    let canvas = Dom.query("#canvas") ?? Dom.create("canvas")
+    draw(Dom.context_2d(canvas), array_make(W * H * 4, 0u8), 0)
+  })

@@ -1,0 +1,247 @@
+import bin
+import math.real as real
+import web.dom
+import web.run
+import web.timer
+
+const W : Int = 720
+
+const H : Int = 480
+
+const SHADES : Int = 1024
+
+const COARSE : Int = 16
+
+const BUDGET_MS : Int = 24
+
+const FACTOR : Real = 3.0
+
+const FINEST : Real = 0.0000000000005
+
+extern "js"(".clientWidth") fn client_width(n: Node) : I32 / Js
+
+type View = { cx: Real, cy: Real, span: Real }
+
+const HOME : View = View { cx: -0.65, cy: 0.0, span: 3.6 }
+
+# One refinement pass paints `size`-pixel blocks, a strip of rows at a time; `size`
+# halves after each pass and reaches 0 when the image is exact.
+type Job = { view: View, iters: Int, size: Int, y: Int, started: Int }
+
+type Scene = { canvas: Node, ctx: Ctx2d, status: Node, pixels: Array[Byte], palette: Array[Byte] }
+
+type Stop = { at: Real, r: Real, g: Real, b: Real }
+
+const STOPS : [Stop] = [
+  Stop { at: 0.0, r: 0.0, g: 7.0, b: 100.0 },
+  Stop { at: 0.16, r: 32.0, g: 107.0, b: 203.0 },
+  Stop { at: 0.42, r: 237.0, g: 255.0, b: 255.0 },
+  Stop { at: 0.6425, r: 255.0, g: 170.0, b: 0.0 },
+  Stop { at: 0.8575, r: 0.0, g: 2.0, b: 0.0 },
+  Stop { at: 1.0, r: 0.0, g: 7.0, b: 100.0 }
+]
+
+fn mix(a: Real, b: Real, t: Real) : Int = real_to_int(a + (b - a) * t)
+
+fn blend(stops: [Stop], t: Real) : (Int, Int, Int) = match stops {
+  [a, b, ...rest] ->
+    if t <= b.at {
+      let k = (t - a.at) / (b.at - a.at)
+      (mix(a.r, b.r, k), mix(a.g, b.g, k), mix(a.b, b.b, k))
+    } else {
+      blend([b, ...rest], t)
+    }
+  _ -> (0, 0, 0)
+}
+
+fn tint(pal: Array[Byte], i: Int) : Unit / Mutable {
+  let c = blend(STOPS, int_to_real(i) / int_to_real(SHADES))
+  pal[i * 4] := bin.byte(c.fst)
+  pal[i * 4 + 1] := bin.byte(c.snd)
+  pal[i * 4 + 2] := bin.byte(c.trd)
+}
+
+# RGBA bytes for each shade, plus black for the set itself at index SHADES.
+fn palette() : Array[Byte] / Mutable {
+  let pal = array_make((SHADES + 1) * 4, 255u8)
+  [0..(SHADES - 1)] |! tint(pal, .)
+  pal[SHADES * 4] := 0u8
+  pal[SHADES * 4 + 1] := 0u8
+  pal[SHADES * 4 + 2] := 0u8
+  pal
+}
+
+# Escape time with the fractional part that hides the colour bands; -1 inside the set.
+fn escape(cr: Real, ci: Real, zr: Real, zi: Real, n: Int, limit: Int) : Real {
+  let m = zr * zr + zi * zi
+  if n >= limit {
+    -1.0
+  } else if m > 256.0 {
+    int_to_real(n) + 1.0 - real_log2(real_log2(m) / 2.0)
+  } else {
+    escape(cr, ci, zr * zr - zi * zi + cr, 2.0 * zr * zi + ci, n + 1, limit)
+  }
+}
+
+# The main cardioid and the period-2 bulb never escape; skipping them saves the costliest pixels.
+fn inside(x: Real, y: Real) : Bool {
+  let q = (x - 0.25) * (x - 0.25) + y * y
+  q * (q + x - 0.25) <= 0.25 * y * y or (x + 1.0) * (x + 1.0) + y * y <= 0.0625
+}
+
+fn point(v: View, x: Real, y: Real) : (Real, Real) {
+  let step = v.span / int_to_real(W)
+  (v.cx + (x - int_to_real(W) / 2.0) * step, v.cy - (y - int_to_real(H) / 2.0) * step)
+}
+
+fn shade(v: View, limit: Int, x: Int, y: Int) : Int {
+  let c = point(v, int_to_real(x), int_to_real(y))
+  let mu = if inside(c.fst, c.snd) { -1.0 } else { escape(c.fst, c.snd, 0.0, 0.0, 0, limit) }
+  if mu < 0.0 {
+    SHADES
+  } else {
+    let s = real_sqrt(mu) * 0.22
+    real_to_int((s - real.floor(s)) * int_to_real(SHADES)) % SHADES
+  }
+}
+
+fn copy4(px: Array[Byte], pal: Array[Byte], from: Int, to: Int) : Unit / Mutable {
+  px[to] := pal[from]
+  px[to + 1] := pal[from + 1]
+  px[to + 2] := pal[from + 2]
+  px[to + 3] := pal[from + 3]
+}
+
+fn block(
+  px: Array[Byte],
+  pal: Array[Byte],
+  from: Int,
+  base: Int,
+  w: Int,
+  h: Int,
+  i: Int
+) : Unit / Mutable =
+  if i < w * h {
+    copy4(px, pal, from, base + (i / w * W + i % w) * 4)
+    block(px, pal, from, base, w, h, i + 1)
+  }
+
+# A block already painted by the previous, coarser pass keeps its sample.
+fn strip(s: Scene, j: Job, x: Int) : Unit / Mutable =
+  if x < W {
+    let kept = j.size < COARSE and x % (j.size * 2) == 0 and j.y % (j.size * 2) == 0
+    if not kept {
+      let base = (j.y * W + x) * 4
+      block(
+        s.pixels,
+        s.palette,
+        shade(j.view, j.iters, x, j.y) * 4,
+        base,
+        min(j.size, W - x),
+        min(j.size, H - j.y),
+        0
+      )
+    }
+    strip(s, j, x + j.size)
+  }
+
+fn next_strip(j: Job) : Job =
+  if j.y + j.size < H {
+    Job { ...j, y: j.y + j.size }
+  } else {
+    Job { ...j, size: j.size / 2, y: 0 }
+  }
+
+fn slice(s: Scene, j: Job, deadline: Int) : Job / Timer + Mutable =
+  if j.size == 0 {
+    j
+  } else {
+    strip(s, j, 0)
+    let n = next_strip(j)
+    if Timer.now_ms() >= deadline { n } else { slice(s, n, deadline) }
+  }
+
+fn iterations(v: View) : Int = min(4000, 160 + real_to_int(90.0 * real_log2(HOME.span / v.span)))
+
+fn start(v: View) : Job / Timer =
+  Job { view: v, iters: iterations(v), size: COARSE, y: 0, started: Timer.now_ms() }
+
+fn zoom(v: View, at: (Real, Real), by: Real) : View {
+  let span = min(HOME.span * 4.0, max(FINEST, v.span * by))
+  View { cx: at.fst, cy: at.snd, span }
+}
+
+fn steer(s: Scene, v: View, e: Event) : View / Js {
+  let scale = int_to_real(W) / int_to_real(max(1, client_width(s.canvas)))
+  let at = point(v, int_to_real(e.x) * scale, int_to_real(e.y) * scale)
+  match e.kind {
+    "click" -> zoom(v, at, 1.0 / FACTOR)
+    "contextmenu" -> zoom(v, at, FACTOR)
+    "keydown" -> match e.key {
+      "r" -> HOME
+      "R" -> HOME
+      "-" -> zoom(v, (v.cx, v.cy), FACTOR)
+      "+" -> zoom(v, (v.cx, v.cy), 1.0 / FACTOR)
+      "=" -> zoom(v, (v.cx, v.cy), 1.0 / FACTOR)
+      _ -> v
+    }
+    _ -> v
+  }
+}
+
+fn drain(s: Scene, v: View) : View / Dom + Js = match Dom.poll_event() {
+  Some(e) -> drain(s, steer(s, v, e))
+  None -> v
+}
+
+fn report(s: Scene, j: Job) : Unit / Dom + Timer {
+  let v = j.view
+  let sign = if v.cy < 0.0 { "−" } else { "+" }
+  let place = "#{v.cx:.12} #{sign} #{abs(v.cy):.12}i"
+  let state =
+    if j.size == 0 { "drawn in #{Timer.now_ms() - j.started} ms" } else { "refining #{j.size} px" }
+  Dom.set_text(
+    s.status,
+    "#{place} · zoom #{real_to_int(HOME.span / v.span)}× · #{j.iters} iterations · #{state}"
+  )
+}
+
+# Each frame computes strips for BUDGET_MS, shows the buffer with one put_pixels, and
+# lets the page paint and deliver clicks before the next slice.
+fn work(s: Scene, j: Job) : Unit / Dom + Timer + Js + Mutable {
+  let j2 = slice(s, j, Timer.now_ms() + BUDGET_MS)
+  Dom.put_pixels(s.ctx, s.pixels, W, H, 0, 0)
+  report(s, j2)
+  Timer.animation_frame() |> ignore
+  let v = drain(s, j.view)
+  if v != j.view {
+    work(s, start(v))
+  } else if j2.size == 0 {
+    idle(s, j2)
+  } else {
+    work(s, j2)
+  }
+}
+
+fn idle(s: Scene, j: Job) : Unit / Dom + Timer + Js + Mutable {
+  let v = steer(s, j.view, Dom.next_event())
+  if v != j.view { work(s, start(v)) } else { idle(s, j) }
+}
+
+fn element(id: String) : Node / Dom = Dom.query("##{id}") ?? Dom.create("span")
+
+fn main() : Unit / Js + Ffi + Clock + Mutable =
+  run.run(() => {
+    let canvas = element("canvas")
+    let scene = Scene {
+      canvas,
+      ctx: Dom.context_2d(canvas),
+      status: element("status"),
+      pixels: array_make(W * H * 4, 255u8),
+      palette: palette()
+    }
+    Dom.listen(canvas, "click")
+    Dom.listen(canvas, "contextmenu")
+    Dom.listen(Dom.query("body") ?? canvas, "keydown")
+    work(scene, start(HOME))
+  })

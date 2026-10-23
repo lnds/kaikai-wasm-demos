@@ -144,15 +144,15 @@ cat > "$SITE/index.html" <<EOF
 <h1>kaikai on WebAssembly</h1>
 <p>Small kaikai programs compiled to WebAssembly and run in your browser.</p>
 </header>
-<h2 class="section">Canvas</h2>
-<p class="intro">Animations drawn on a canvas through <code>extern "js"</code>, paced by <code>Clock.sleep</code> on the page's event loop.</p>
+<h2 class="section">On the page</h2>
+<p class="intro">Games, canvases and widgets that draw on the page and listen to it: keys, clicks and timer ticks arrive as values from <code>Dom.next_event</code>, through the effects <code>web.run</code> installs, or through <code>extern "js"</code>.</p>
 <div class="gallery">
 $canvas_cards</div>
 <h2 class="section">Console</h2>
 <p class="intro">Programs that compute and print; what they write to <code>Stdout</code> lands on the page.</p>
 <div class="gallery">
 $console_cards</div>
-<footer>Built with <code>kai build --target=wasm32-browser</code>. Keyboard and mouse demos arrive with DOM events.</footer>
+<footer>Built with <code>kai build --target=wasm32-browser</code>. The pages that wait for events or sleep need JSPI: Chrome/Edge 137, Firefox 153, Safari 27.</footer>
 </main>
 </body>
 </html>

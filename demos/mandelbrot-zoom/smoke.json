@@ -1,0 +1,7 @@
+{
+  "events": [
+    { "at": 1500, "type": "click", "to": "#canvas", "x": 237, "y": 192 },
+    { "at": 2500, "type": "click", "to": "#canvas", "x": 360, "y": 240 }
+  ],
+  "expect": { "#status": "-1.265000000000 + 0.240000000000i · zoom 9×" }
+}

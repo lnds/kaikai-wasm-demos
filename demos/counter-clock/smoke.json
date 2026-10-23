@@ -1,0 +1,8 @@
+{
+  "events": [
+    { "at": 300, "type": "click", "to": "#click" },
+    { "at": 400, "type": "click", "to": "#click" },
+    { "at": 500, "type": "click", "to": "#click" }
+  ],
+  "expect": { "#count": "3 clicks", "#last": "last click at", "#time": ":" }
+}

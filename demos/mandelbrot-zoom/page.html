@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mandelbrot zoom · kaikai on WebAssembly</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<main>
+<a class="back" href="../">← all demos</a>
+<header>
+<h1>Mandelbrot zoom</h1>
+<p>Click to zoom in three times, centred where you click. Each view is drawn coarse first and refined pass by pass: every frame computes for a few milliseconds, writes the RGBA buffer to the canvas with one <code>Dom.put_pixels</code>, and reads the clicks that came in, so a new click interrupts a render at once.</p>
+</header>
+<section>
+<div class="hud">
+<span class="keys"><kbd>click</kbd> zoom in · <kbd>right-click</kbd> or <kbd>-</kbd> zoom out · <kbd>+</kbd> zoom in at the centre · <kbd>R</kbd> reset</span>
+</div>
+<canvas id="canvas" class="stage zoomable" width="720" height="480" oncontextmenu="return false"></canvas>
+<p id="status" class="status"></p>
+<pre id="kai-stdout" class="log"></pre>
+</section>
+<section>
+<h2>Source · mandelbrot-zoom/main.kai</h2>
+<!-- source -->
+</section>
+<footer>Compiled from kaikai to WebAssembly with <code>kai build --target=wasm32-browser</code>. Needs JSPI: Chrome/Edge 137, Firefox 153, Safari 27.</footer>
+</main>
+<script type="module" src="app.mjs"></script>
+</body>
+</html>

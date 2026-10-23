@@ -1,42 +1,29 @@
-import time
+import bin
+import web.dom
+import web.run
+import web.timer
 
 const W : Int = 200
 
 const H : Int = 125
-
-const FRAME_NS : Int = 33_000_000
-
-extern "js" opaque Node
-
-extern "js" opaque Ctx
-
-extern "js" opaque Image
-
-extern "js"("document.getElementById") fn element(id: String) : Node / Js
-
-extern "js"(".textContent=") fn set_text(n: Node, s: String) : Unit / Js
-
-extern "js"(".getContext") fn context(canvas: Node, kind: String) : Ctx / Js
-
-extern "js"("pixels.image") fn image(w: I32, h: I32) : Image / Js
-
-extern "js"("pixels.set") fn set_pixel(img: Image, i: I32, rgb: I32) : Unit / Js
-
-extern "js"("pixels.show") fn show(ctx: Ctx, img: Image, smooth: Bool) : Unit / Js
 
 const TAU : Real = 6.283185307179586
 
 fn channel(t: Real, freq: Real, phase: Real) : Int =
   real_to_int(127.5 + 127.5 * real_cos(TAU * (freq * t + phase)))
 
-# 256 colours from a cosine gradient that wraps around; the frame number rotates the lookup.
-fn palette() : Vec[Int] {
-  let v: Vec[Int] = [0..255]
-    | (i => {
-      let t = int_to_real(i) / 256.0
-      channel(t, 1.0, 0.5) * 65536 + channel(t, 2.0, 0.2) * 256 + channel(t, 1.0, 0.25)
-    })
-  v
+fn tint(pal: Array[Byte], i: Int) : Unit / Mutable {
+  let t = int_to_real(i) / 256.0
+  pal[i * 4] := bin.byte(channel(t, 1.0, 0.5))
+  pal[i * 4 + 1] := bin.byte(channel(t, 2.0, 0.2))
+  pal[i * 4 + 2] := bin.byte(channel(t, 1.0, 0.25))
+}
+
+# 256 RGBA colours from a cosine gradient that wraps around; the frame number rotates the lookup.
+fn palette() : Array[Byte] / Mutable {
+  let pal = array_make(256 * 4, 255u8)
+  [0..255] |! tint(pal, .)
+  pal
 }
 
 fn plasma(x: Real, y: Real, t: Real) : Real {
@@ -47,54 +34,52 @@ fn plasma(x: Real, y: Real, t: Real) : Real {
     + real_sin(real_sqrt(100.0 * (cx * cx + cy * cy) + 1.0) + t)
 }
 
-fn shade(pal: Vec[Int], v: Real, frame: Int) : Int =
-  pal[(real_to_int((v + 3.0) * 42.5) + frame) % 256]
-
-fn colour(pal: Vec[Int], i: Int, frame: Int) : Int {
+fn shade(i: Int, frame: Int) : Int {
   let x = int_to_real(i % W) / int_to_real(H) - 0.8
   let y = int_to_real(i / W) / int_to_real(H) - 0.5
-  shade(pal, plasma(x, y, int_to_real(frame) * 0.04), frame)
+  (real_to_int((plasma(x, y, int_to_real(frame) * 0.04) + 3.0) * 42.5) + frame) % 256
 }
 
-fn render(img: Image, pal: Vec[Int], frame: Int) : Unit / Js =
-  [0..(W * H - 1)] |! set_pixel(img, ., colour(pal, ., frame))
+fn render(px: Array[Byte], pal: Array[Byte], frame: Int, i: Int) : Unit / Mutable =
+  if i < W * H {
+    let from = shade(i, frame) * 4
+    px[i * 4] := pal[from]
+    px[i * 4 + 1] := pal[from + 1]
+    px[i * 4 + 2] := pal[from + 2]
+    px[i * 4 + 3] := 255u8
+    render(px, pal, frame, i + 1)
+  }
 
-# Sleeps until `due` (monotonic nanoseconds), or one animation frame when late,
-# and returns the next deadline.
-fn pace(due: Int) : Int / Clock {
-  let now = instant_to_nanos(monotonic())
-  if due > now { sleep(nanos_dur(due - now)) } else { sleep(millis(1)) }
-  max(due, now) + FRAME_NS
-}
+type Screen = { ctx: Ctx2d, status: Node, pixels: Array[Byte], pal: Array[Byte] }
 
-type Screen = { ctx: Ctx, img: Image, status: Node, pal: Vec[Int] }
-
-# Every 30 frames the status line reports the rate measured since `mark`.
-fn report(s: Screen, frame: Int, mark: Int) : Int / Js + Clock =
-  if frame % 30 != 0 {
+# Every 30 rendered frames the status line reports the rate measured since `mark`.
+fn report(s: Screen, n: Int, mark: Real, now: Real) : Real / Dom =
+  if n % 30 != 0 {
     mark
   } else {
-    let now = instant_to_nanos(monotonic())
-    if frame > 0 {
-      set_text(s.status, "frame #{frame} · #{30_000_000_000 / max(now - mark, 1)} fps")
+    if n > 0 {
+      Dom.set_text(s.status, "frame #{n} · #{real_to_int(30000.0 / max(now - mark, 1.0))} fps")
     }
     now
   }
 
-fn animate(s: Screen, frame: Int, due: Int, mark: Int) : Unit / Js + Clock {
-  render(s.img, s.pal, frame)
-  show(s.ctx, s.img, true)
-  let mark2 = report(s, frame, mark)
-  animate(s, frame + 1, pace(due), mark2)
+# The plasma moves at 30 steps a second of page time, whatever the display's rate.
+fn animate(s: Screen, t0: Real, n: Int, mark: Real) : Unit / Dom + Timer + Mutable {
+  let now = Timer.animation_frame()
+  render(s.pixels, s.pal, real_to_int((now - t0) * 0.03), 0)
+  Dom.put_pixels(s.ctx, s.pixels, W, H, 0, 0)
+  animate(s, t0, n + 1, report(s, n, mark, now))
 }
 
-fn main() : Unit / Js + Clock {
-  let screen = Screen {
-    ctx: context(element("canvas"), "2d"),
-    img: image(W, H),
-    status: element("status"),
-    pal: palette()
-  }
-  let now = instant_to_nanos(monotonic())
-  animate(screen, 0, now, now)
-}
+fn main() : Unit / Js + Ffi + Clock + Mutable =
+  run.run(() => {
+    let canvas = Dom.query("#canvas") ?? Dom.create("canvas")
+    let screen = Screen {
+      ctx: Dom.context_2d(canvas),
+      status: Dom.query("#status") ?? canvas,
+      pixels: array_make(W * H * 4, 255u8),
+      pal: palette()
+    }
+    let t0 = Timer.animation_frame()
+    animate(screen, t0, 0, t0)
+  })

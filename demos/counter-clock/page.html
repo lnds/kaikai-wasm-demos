@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Counter and clock · kaikai on WebAssembly</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<main>
+<a class="back" href="../">← all demos</a>
+<header>
+<h1>Counter and clock</h1>
+<p>The DOM effects in their simplest form: <code>Dom.listen</code> asks for the button's clicks, <code>Timer.every</code> posts a tick five times a second, and one loop takes each event from <code>Dom.next_event</code> and updates the page with <code>Dom.set_text</code>.</p>
+</header>
+<section class="face">
+<div id="time" class="time">--:--:--</div>
+<div id="date" class="date">&nbsp;</div>
+<button id="click" class="press" type="button">Click me</button>
+<div id="count" class="count">0 clicks</div>
+<div id="last" class="last">&nbsp;</div>
+<pre id="kai-stdout" class="log"></pre>
+</section>
+<section>
+<h2>Source · counter-clock/main.kai</h2>
+<!-- source -->
+</section>
+<footer>Compiled from kaikai to WebAssembly with <code>kai build --target=wasm32-browser</code>. Needs JSPI: Chrome/Edge 137, Firefox 153, Safari 27.</footer>
+</main>
+<script type="module" src="app.mjs"></script>
+</body>
+</html>

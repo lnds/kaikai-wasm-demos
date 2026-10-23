@@ -11,10 +11,10 @@
 <a class="back" href="../">← all demos</a>
 <header>
 <h1>Plasma</h1>
-<p>The demoscene plasma: three moving sine fields summed per pixel and coloured through a rotating palette, at 30 frames a second.</p>
+<p>The demoscene plasma: three moving sine fields summed per pixel and coloured through a rotating palette. Each animation frame fills a 200×125 RGBA buffer and draws it with one <code>Dom.put_pixels</code>; the browser scales it up.</p>
 </header>
 <section>
-<canvas id="canvas" class="stage" width="800" height="500"></canvas>
+<canvas id="canvas" class="stage upscaled" width="200" height="125"></canvas>
 <p id="status" class="status"></p>
 <pre id="kai-stdout" class="log"></pre>
 </section>

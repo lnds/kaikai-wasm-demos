@@ -4,22 +4,45 @@
 first-class primitive, Elixir-style pipelines, and native compilation through LLVM.
 This repository collects small kaikai programs built for the browser with `--target=wasm32-browser`.
 
-### Canvas
+### On the page
 
 | Demo | What it shows |
 | --- | --- |
-| [mandelbrot-canvas](demos/mandelbrot-canvas/main.kai) | The Mandelbrot set at 600×400 with smooth escape-time colouring, filled in row by row. |
+| [snake](demos/snake/main.kai) | A playable Snake: arrow keys or WASD, speed-up as it grows, pause, game over and restart with Space, best score kept in `localStorage`. |
+| [mandelbrot-zoom](demos/mandelbrot-zoom/main.kai) | The Mandelbrot set that zooms in where you click (right-click or `-` zooms out, `R` resets), refined from coarse blocks to exact pixels while staying responsive. |
+| [mandelbrot-canvas](demos/mandelbrot-canvas/main.kai) | The Mandelbrot set at 600×400 with smooth escape-time colouring, filled in a band of rows per frame. |
 | [life-canvas](demos/life-canvas/main.kai) | Game of Life on a 120×80 board at 25 generations a second: a Gosper glider gun, an acorn and an R-pentomino. |
-| [plasma](demos/plasma/main.kai) | The demoscene plasma: three moving sine fields per pixel through a rotating palette, at 30 frames a second. |
+| [plasma](demos/plasma/main.kai) | The demoscene plasma: three moving sine fields per pixel through a rotating palette, on every animation frame. |
 | [maze-canvas](demos/maze-canvas/main.kai) | A maze carved live by a depth-first backtracker, flooded by breadth-first search and solved, forever. |
+| [counter-clock](demos/counter-clock/main.kai) | A click counter and a live clock: the DOM effects in their simplest form. |
 
-The canvas demos reach the page through `extern "js"` declarations: `document.getElementById`,
-`.getContext`, `.fillRect`, `.fillStyle=`, `.textContent=`, with the canvas, its context and an
-`ImageData` held as `extern "js" opaque` handles. `extern "js"` passes scalars, strings and handles,
-not byte buffers, so the per-pixel demos write one packed colour per call into an `ImageData` through
-[web/canvas.mjs](web/canvas.mjs), the `[js]` module their `kai.toml` names. They animate with
-`Clock.sleep`, which parks on the page's event loop: a sleep of a frame or less wakes on the next
-animation frame, and the page stays responsive throughout.
+## Interactive
+
+The interactive demos use kaikai's browser stdlib. `web.run { … }` installs four effects answered
+by the page: `Dom` (`web.dom`: query and build nodes, a 2D canvas, events), `Timer` (`web.timer`:
+`now_ms`, `sleep_ms`, `animation_frame`, `every`), `Storage` (`web.storage`, over `localStorage`)
+and `Fetch` (`web.fetch`). Nothing in JavaScript calls back into the program: `Dom.listen(node, "keydown")`
+asks the page to queue events of a kind, and the program takes them as values, an
+`Event { kind, key, x, y, target }`, with `Dom.next_event()` (which parks the program until one
+arrives) or `Dom.poll_event()` (which returns `None` when the queue is empty).
+
+- **snake** keeps the whole game in an immutable record stepped by a pure `tick`. Each
+  `Timer.animation_frame` drains the queued keys with `poll_event`, runs the steps that are due, and
+  draws the snake part of the way through its current step, so it glides between cells. Between
+  games it parks on `next_event`. The best score goes to `Storage`.
+- **mandelbrot-zoom** keeps an RGBA `Array[Byte]`, computes for a few milliseconds per frame, and
+  draws it with one `Dom.put_pixels`. A click that arrives mid-render restarts at the new view on
+  the next frame.
+- **mandelbrot-canvas** and **plasma** draw the same way, with one `put_pixels` per frame; plasma
+  writes a 200×125 buffer and lets the browser scale the canvas up.
+- **counter-clock** reads a button's clicks and a `Timer.every` tick from the same queue and
+  answers with `Dom.set_text`.
+
+**life-canvas** and **maze-canvas** reach the page through their own `extern "js"` declarations
+instead (`document.getElementById`, `.getContext`, `.fillRect`, `.textContent=`), with the canvas,
+its context and an `ImageData` held as `extern "js" opaque` handles; life-canvas writes its pixels
+one call at a time through [web/canvas.mjs](web/canvas.mjs), the `[js]` module its `kai.toml`
+names. They animate with `Clock.sleep`, which parks on the page's event loop.
 
 ### Console
 
@@ -38,14 +61,17 @@ A console demo is a plain program that computes and prints: what it writes to `S
 
 ## Requirements
 
-- **kaikai main (next release)** — `kai build --target=wasm32-browser` with `extern "js"` and waits
-  that park on the page's event loop. The first wasm build downloads wasi-sdk 34 into the user cache
-  and verifies its checksum.
-- A browser with WebAssembly exception handling (exnref) and JavaScript Promise Integration (JSPI):
-  Chrome/Edge 137+, Firefox 153+, Safari 27+. The canvas demos sleep, which needs JSPI; with current
-  kaikai main every module imports it, the console demos included.
-- `node` for `check.sh` (node 23 needs `--experimental-wasm-jspi`, an older node also
-  `--experimental-wasm-exnref`; `check.sh` adds them).
+- **kaikai main (next release)**: `kai build --target=wasm32-browser` with `extern "js"` and the
+  browser stdlib (`web.run`, `web.dom`, `web.timer`, `web.storage`). Use the first kaikai release
+  that ships them, or later. The first wasm build downloads wasi-sdk 34 into the user cache and
+  verifies its checksum.
+- A browser with WebAssembly exception handling (exnref). A page that suspends (one that waits
+  for events, frames or sleeps: every page in the first section) also needs JavaScript Promise
+  Integration: Chrome/Edge 137+, Firefox 153+, Safari 27+. A page that never suspends, like the
+  console demos, runs on any engine with exception handling: Chrome/Edge 137+, Firefox 131+,
+  Safari 18.4+.
+- `node` for `check.sh` (node 23 needs `--experimental-wasm-jspi` and `--experimental-wasm-exnref`;
+  `check.sh` adds them).
 - `python3` (or any static file server) to serve the site locally.
 
 ## Build
@@ -77,23 +103,28 @@ python3 -m http.server 8000 --directory site
 ```
 
 `demos/<name>/expected.txt` is the output of `kai run main.kai` on the host; a console demo's wasm
-build must print exactly the same bytes. A canvas demo runs for two seconds against the stub page in
-[web/smoke.mjs](web/smoke.mjs) — a canvas whose context counts the calls it receives — and passes
-when it draws something without throwing.
+build must print exactly the same bytes. A page demo runs for four seconds against the stub
+document in [web/smoke.mjs](web/smoke.mjs): a canvas whose context counts the calls it receives,
+and elements that keep their text and the listeners the program registers. A demo with a
+`smoke.json` is fed the events it lists (keys, clicks) at set times, and its `expect` entries name
+an element and text it must contain at the end. The demo passes when it draws something or meets
+its expectations, without throwing.
 
 ## Adding a demo
 
 1. Create `demos/<name>/main.kai` and a `demos/<name>/README.md` whose `# Title` and first
    paragraph become the gallery card.
-2. Add `<name>` to `demos.txt` under `[canvas]` or `[console]` (the order sets the gallery's).
+2. Add `<name>` to `demos.txt` under `[canvas]` (the "On the page" section) or `[console]`; the
+   order sets the gallery's.
 3. For a console demo, run `./check.sh --update <name>` to record its expected output.
 
 A demo that needs its own markup ships `demos/<name>/page.html`; `build.sh` uses it instead of the
 generated page, replacing a line `<!-- source -->` with the program's source. It must keep
 `<pre id="kai-stdout">` (where `Stdout` goes) and `<script type="module" src="app.mjs"></script>`.
-A canvas demo's page adds the `<canvas id="canvas">` it draws on, and its card shows
-`demos/<name>/thumb.png`, a screenshot of the canvas. A demo that writes pixels lists the shared
-module in its `kai.toml`:
+A page demo adds the elements it draws on or listens to, and its card shows
+`demos/<name>/thumb.png`, a screenshot. It may add a `smoke.json` for `check.sh`. A demo that
+writes pixels through the shared `[js]` module rather than `Dom.put_pixels` lists it in its
+`kai.toml`:
 
 ```toml
 name = "my-demo"
@@ -105,11 +136,3 @@ module = "../../web/canvas.mjs"
 
 Limits on the page: no `File`, `Stdin`, sockets, processes or signals, and non-tail recursion is
 bounded by the engine's stack (about 6000 frames in Chrome), so the demos loop with tail calls.
-
-## Coming next
-
-Keyboard and mouse events reach kaikai with the DOM bindings. These demos wait for them:
-
-- **snake** — the classic, steered from the keyboard.
-- **click-to-zoom Mandelbrot** — the canvas Mandelbrot, recentred and zoomed where you click.
-- **fetch JSON** — load a JSON document over HTTP, decode it and render a table.

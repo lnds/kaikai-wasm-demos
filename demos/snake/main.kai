@@ -1,0 +1,325 @@
+import web.dom
+import web.run
+import web.storage
+import web.timer
+
+const COLS : Int = 24
+
+const ROWS : Int = 18
+
+const CELL : Int = 28
+
+const START_STEP : Real = 135.0
+
+const FASTEST_STEP : Real = 55.0
+
+const BEST_KEY : String = "kaikai-demos.snake.best"
+
+extern "js"(".textAlign=") fn text_align(c: Ctx2d, align: String) : Unit / Js
+
+type Phase = Ready | Playing | Paused | Over
+
+type Game = {
+  body: [(Int, Int)],
+  vacated: (Int, Int),
+  dir: (Int, Int),
+  turns: [(Int, Int)],
+  food: (Int, Int),
+  score: Int,
+  best: Int,
+  step: Real,
+  seed: Int,
+  phase: Phase
+}
+
+type Screen = { ctx: Ctx2d, score: Node, best: Node }
+
+fn next_seed(s: Int) : Int = (s * 1103515245 + 12345) % 2147483648
+
+fn place(seed: Int, body: [(Int, Int)]) : ((Int, Int), Int) {
+  let s = next_seed(seed)
+  let p = (s / 65536 % COLS, s / 7 % ROWS)
+  if contains(body, p) { place(s, body) } else { (p, s) }
+}
+
+fn new_game(best: Int, seed: Int, phase: Phase) : Game {
+  let body = [(8, 9), (7, 9), (6, 9), (5, 9)]
+  let food = place(seed, body)
+  Game {
+    body: body,
+    vacated: (4, 9),
+    dir: (1, 0),
+    turns: [],
+    food: food.fst,
+    score: 0,
+    best,
+    step: START_STEP,
+    seed: food.snd,
+    phase
+  }
+}
+
+fn head(g: Game) : (Int, Int) = list.head(g.body) ?? ((0, 0))
+
+fn last_cell(g: Game) : (Int, Int) = list.last(g.body) ?? ((0, 0))
+
+fn blocked(body: [(Int, Int)], p: (Int, Int)) : Bool =
+  p.fst < 0 or p.fst >= COLS or p.snd < 0 or p.snd >= ROWS or contains(body, p)
+
+fn direction(key: String) : Option[(Int, Int)] = match key {
+  "ArrowUp" -> Some((0, -1))
+  "w" -> Some((0, -1))
+  "W" -> Some((0, -1))
+  "ArrowDown" -> Some((0, 1))
+  "s" -> Some((0, 1))
+  "S" -> Some((0, 1))
+  "ArrowLeft" -> Some((-1, 0))
+  "a" -> Some((-1, 0))
+  "A" -> Some((-1, 0))
+  "ArrowRight" -> Some((1, 0))
+  "d" -> Some((1, 0))
+  "D" -> Some((1, 0))
+  _ -> None
+}
+
+# A turn is queued against the last queued direction, so two quick presses make a U-turn.
+fn steer(g: Game, d: (Int, Int)) : Game {
+  let last = list.last(g.turns) ?? g.dir
+  let reverse = d.fst + last.fst == 0 and d.snd + last.snd == 0
+  if d == last or reverse or list.length(g.turns) >= 3 {
+    g
+  } else {
+    Game { ...g, turns: [...g.turns, d] }
+  }
+}
+
+fn press(g: Game, key: String) : Game = match g.phase {
+  Playing ->
+    if key == " " or key == "p" or key == "P" {
+      Game { ...g, phase: Paused }
+    } else {
+      match direction(key) {
+        Some(d) -> steer(g, d)
+        None -> g
+      }
+    }
+  Paused -> if key == " " or key == "p" or key == "P" { Game { ...g, phase: Playing } } else { g }
+  _ -> if key == " " { new_game(g.best, g.seed, Playing) } else { g }
+}
+
+fn eat(g: Game, h: (Int, Int)) : Game {
+  let body = [h, ...g.body]
+  let food = place(g.seed, body)
+  Game {
+    ...g,
+    body: body,
+    vacated: last_cell(g),
+    food: food.fst,
+    seed: food.snd,
+    score: g.score + 1,
+    best: max(g.best, g.score + 1),
+    step: max(FASTEST_STEP, g.step * 0.96)
+  }
+}
+
+fn tick(g: Game) : Game {
+  let dir = list.head(g.turns) ?? g.dir
+  let turns = list.drop(g.turns, 1)
+  let h = head(g)
+  let p = (h.fst + dir.fst, h.snd + dir.snd)
+  let moved = list.take(g.body, list.length(g.body) - 1)
+  if p == g.food {
+    eat(Game { ...g, dir: dir, turns: turns }, p)
+  } else if blocked(moved, p) {
+    Game { ...g, dir: dir, turns: turns, phase: Over }
+  } else {
+    Game { ...g, dir: dir, turns: turns, body: [p, ...moved], vacated: last_cell(g) }
+  }
+}
+
+# Runs the steps that fit in `acc` milliseconds; returns the game and the time left over.
+fn advance(g: Game, acc: Real) : (Game, Real) =
+  if g.phase == Playing and acc >= g.step { advance(tick(g), acc - g.step) } else { (g, acc) }
+
+fn drain(g: Game) : Game / Dom = match Dom.poll_event() {
+  Some(e) -> if e.kind == "keydown" { drain(press(g, e.key)) } else { drain(g) }
+  None -> g
+}
+
+# ---- drawing
+
+const W : Int = COLS * CELL
+
+const H : Int = ROWS * CELL
+
+const THICK : Real = 22.0
+
+fn center(p: (Int, Int)) : (Real, Real) =
+  (int_to_real(p.fst * CELL + CELL / 2), int_to_real(p.snd * CELL + CELL / 2))
+
+fn lerp(a: (Real, Real), b: (Real, Real), t: Real) : (Real, Real) =
+  (a.fst + (b.fst - a.fst) * t, a.snd + (b.snd - a.snd) * t)
+
+fn ri(x: Real) : Int = real_to_int(x)
+
+fn disc(c: Ctx2d, p: (Real, Real), r: Real) : Unit / Dom {
+  Dom.begin_path(c)
+  Dom.arc(c, p.fst, p.snd, r, 0.0, 6.2832)
+  Dom.fill(c)
+}
+
+fn board(c: Ctx2d) : Unit / Dom {
+  Dom.set_fill_style(c, "#132219")
+  Dom.fill_rect(c, 0, 0, W, H)
+  Dom.set_fill_style(c, "#1a2d22")
+  [0..(COLS * ROWS - 1)]
+    |? ((. / COLS + . % COLS) % 2 == 0)
+    |! Dom.fill_rect(c, . % COLS * CELL, . / COLS * CELL, CELL, CELL)
+}
+
+fn mix(a: Int, b: Int, t: Real) : Int = ri(int_to_real(a) + int_to_real(b - a) * t)
+
+# Head to tail: from a bright lime to a deep green.
+fn shade(i: Int, n: Int) : String {
+  let t = int_to_real(i) / int_to_real(max(n - 1, 1))
+  "rgb(#{mix(158, 38, t)}, #{mix(240, 140, t)}, #{mix(110, 92, t)})"
+}
+
+# One straight piece between two neighbouring points, with a round joint at `a`.
+fn piece(c: Ctx2d, a: (Real, Real), b: (Real, Real), css: String) : Unit / Dom {
+  let half = THICK / 2.0
+  let flat = a.snd == b.snd
+  let x0 = if flat { min(a.fst, b.fst) } else { a.fst - half }
+  let y0 = if flat { a.snd - half } else { min(a.snd, b.snd) }
+  let w = if flat { abs(a.fst - b.fst) } else { THICK }
+  let h = if flat { THICK } else { abs(a.snd - b.snd) }
+  Dom.set_fill_style(c, css)
+  Dom.fill_rect(c, ri(x0), ri(y0), ri(x0 + w) - ri(x0), ri(y0 + h) - ri(y0))
+  disc(c, a, half)
+}
+
+fn pieces(c: Ctx2d, pts: [(Real, Real)], i: Int, n: Int) : Unit / Dom = match pts {
+  [a, b, ...rest] -> {
+    piece(c, a, b, shade(i, n))
+    pieces(c, [b, ...rest], i + 1, n)
+  }
+  [a] -> {
+    Dom.set_fill_style(c, shade(i, n))
+    disc(c, a, THICK / 2.0)
+  }
+  [] -> ()
+}
+
+fn eyes(c: Ctx2d, at: (Real, Real), d: (Int, Int)) : Unit / Dom {
+  let fx = int_to_real(d.fst)
+  let fy = int_to_real(d.snd)
+  let l = (at.fst + fx * 3.0 - fy * 5.5, at.snd + fy * 3.0 + fx * 5.5)
+  let r = (at.fst + fx * 3.0 + fy * 5.5, at.snd + fy * 3.0 - fx * 5.5)
+  Dom.set_fill_style(c, "#f4fff0")
+  disc(c, l, 4.2)
+  disc(c, r, 4.2)
+  Dom.set_fill_style(c, "#10180f")
+  disc(c, (l.fst + fx * 1.6, l.snd + fy * 1.6), 2.1)
+  disc(c, (r.fst + fx * 1.6, r.snd + fy * 1.6), 2.1)
+}
+
+fn food(c: Ctx2d, p: (Int, Int), clock: Real) : Unit / Dom {
+  let o = center(p)
+  let r = 9.0 + 1.2 * real_sin(clock / 160.0)
+  Dom.set_fill_style(c, "rgba(255, 90, 95, 0.18)")
+  disc(c, o, r + 5.0)
+  Dom.set_fill_style(c, "#ff5a5f")
+  disc(c, o, r)
+  Dom.set_fill_style(c, "rgba(255, 255, 255, 0.55)")
+  disc(c, (o.fst - r * 0.35, o.snd - r * 0.35), r * 0.28)
+  Dom.set_fill_style(c, "#7bd37a")
+  Dom.fill_rect(c, ri(o.fst) - 1, ri(o.snd - r) - 5, 3, 6)
+}
+
+# The snake is drawn `t` of the way through its current step: the head slides into its
+# cell and the tail slides out of the one it vacated.
+fn snake(c: Ctx2d, g: Game, t: Real) : Unit / Dom {
+  let mid = list.take(g.body, list.length(g.body) - 1) | center
+  let tip = lerp(center(g.vacated), center(last_cell(g)), t)
+  let nose = lerp(list.nth(mid, 1) ?? center(head(g)), center(head(g)), t)
+  let pts = [nose, ...list.drop(mid, 1), center(last_cell(g)), tip]
+  pieces(c, pts, 0, list.length(pts))
+  eyes(c, nose, g.dir)
+}
+
+fn banner(c: Ctx2d, title: String, hint: String) : Unit / Dom {
+  Dom.set_fill_style(c, "rgba(8, 14, 11, 0.72)")
+  Dom.fill_rect(c, 0, 0, W, H)
+  Dom.set_fill_style(c, "#eaffe0")
+  Dom.set_font(c, "700 46px system-ui, -apple-system, sans-serif")
+  Dom.fill_text(c, title, W / 2, H / 2 - 6)
+  Dom.set_fill_style(c, "#9fc7a8")
+  Dom.set_font(c, "500 17px system-ui, -apple-system, sans-serif")
+  Dom.fill_text(c, hint, W / 2, H / 2 + 32)
+}
+
+fn draw(s: Screen, g: Game, t: Real, clock: Real) : Unit / Dom {
+  board(s.ctx)
+  food(s.ctx, g.food, clock)
+  snake(s.ctx, g, t)
+  match g.phase {
+    Ready -> banner(s.ctx, "Snake", "Space to start · arrows or WASD to steer")
+    Paused -> banner(s.ctx, "Paused", "Space to resume")
+    Over -> banner(s.ctx, "Game over · #{g.score}", "Space to play again")
+    Playing -> ()
+  }
+}
+
+fn hud(s: Screen, g: Game) : Unit / Dom {
+  Dom.set_text(s.score, "#{g.score}")
+  Dom.set_text(s.best, "#{g.best}")
+}
+
+# ---- the loop
+
+# While playing, every animation frame drains the queued keys and runs the steps that
+# are due. Any other phase draws once and parks on `next_event` until a key comes.
+fn play(s: Screen, g: Game, last: Real, acc: Real) : Unit / Dom + Timer + Storage {
+  let now = Timer.animation_frame()
+  let g1 = drain(g)
+  let stepped = advance(g1, acc + min(now - last, 250.0))
+  let g2 = stepped.fst
+  if g2.score != g.score { hud(s, g2) }
+  if g2.phase == Playing {
+    draw(s, g2, stepped.snd / g2.step, now)
+    play(s, g2, now, stepped.snd)
+  } else {
+    if g2.phase == Over and g2.score > 0 and g2.score == g2.best {
+      Storage.set(BEST_KEY, "#{g2.best}")
+    }
+    draw(s, g2, if g2.phase == Over { 1.0 } else { stepped.snd / g2.step }, now)
+    idle(s, g2)
+  }
+}
+
+fn idle(s: Screen, g: Game) : Unit / Dom + Timer + Storage {
+  let e = Dom.next_event()
+  let g1 = if e.kind == "keydown" { press(g, e.key) } else { g }
+  if g1.phase == Playing {
+    hud(s, g1)
+    play(s, g1, Timer.animation_frame(), 0.0)
+  } else {
+    idle(s, g1)
+  }
+}
+
+fn element(id: String) : Node / Dom = Dom.query("##{id}") ?? Dom.create("span")
+
+fn main() : Unit / Js + Ffi + Clock =
+  run.run(() => {
+    let canvas = element("board")
+    let ctx = Dom.context_2d(canvas)
+    text_align(ctx, "center")
+    let screen = Screen { ctx, score: element("score"), best: element("best") }
+    let best = (Storage.get(BEST_KEY) || string.to_int) ?? 0
+    let g = new_game(best, Timer.now_ms() % 2147483648, Ready)
+    hud(screen, g)
+    Dom.listen(Dom.query("body") ?? canvas, "keydown")
+    draw(screen, g, 0.0, 0.0)
+    idle(screen, g)
+  })
